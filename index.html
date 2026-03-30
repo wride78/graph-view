@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Graph View</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      background: #0f1117;
+      color: white;
+      font-family: sans-serif;
+    }
+
+    canvas {
+      flex: 1;
+    }
+
+    #panel {
+      width: 300px;
+      background: #1a1d25;
+      padding: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<canvas id="graph"></canvas>
+
+<div id="panel">
+  <h2>Node Info</h2>
+  <div id="info">Click a node</div>
+</div>
+
+<script>
+const SHEET_ID = "10Mxi3ZwBz2b7AgF-zDroRZhahTfsGdMDmbOvWXiv2Q8";
+
+const nodesUrl =
+  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=nodes`;
+
+const edgesUrl =
+  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=edges`;
+
+function csvToJson(csv) {
+  const [header, ...rows] = csv.trim().split("\n");
+  const headers = header.split(",");
+
+  return rows.map(r => {
+    const values = r.split(",");
+    const obj = {};
+    headers.forEach((h, i) => obj[h] = values[i]);
+    return obj;
+  });
+}
+
+Promise.all([
+  fetch(nodesUrl).then(r => r.text()),
+  fetch(edgesUrl).then(r => r.text())
+]).then(([nCsv, eCsv]) => {
+
+  const nodes = csvToJson(nCsv);
+  const edges = csvToJson(eCsv);
+
+  const canvas = document.getElementById("graph");
+  const ctx = canvas.getContext("2d");
+
+  canvas.width = window.innerWidth - 300;
+  canvas.height = window.innerHeight;
+
+  const sim = d3.forceSimulation(nodes)
+    .force("link", d3.forceLink(edges).id(d => d.id).distance(100))
+    .force("charge", d3.forceManyBody().strength(-200))
+    .force("center", d3.forceCenter(canvas.width / 2, canvas.height / 2));
+
+  function draw(selected) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // edges
+    ctx.strokeStyle = "rgba(200,200,200,0.2)";
+    edges.forEach(e => {
+      ctx.beginPath();
+      ctx.moveTo(e.source.x, e.source.y);
+      ctx.lineTo(e.target.x, e.target.y);
+      ctx.stroke();
+    });
+
+    // nodes
+    nodes.forEach(n => {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, selected === n ? 8 : 5, 0, Math.PI * 2);
+      ctx.fillStyle = selected === n ? "#fff" : "#8fa1c7";
+      ctx.fill();
+    });
+  }
+
+  let selectedNode = null;
+
+  sim.on("tick", () => draw(selectedNode));
+
+  canvas.addEventListener("click", (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    selectedNode = nodes.find(n => {
+      const dx = n.x - x;
+      const dy = n.y - y;
+      return Math.sqrt(dx*dx + dy*dy) < 8;
+    });
+
+    if (selectedNode) {
+      document.getElementById("info").innerHTML = `
+        <h3>${selectedNode.label}</h3>
+        <p>ID: ${selectedNode.id}</p>
+        <p>Group: ${selectedNode.group || "-"}</p>
+        <p>${selectedNode.description || ""}</p>
+      `;
+    }
+  });
+
+});
+</script>
+
+</body>
+</html>
