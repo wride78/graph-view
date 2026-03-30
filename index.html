@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Work Graph</title>
 
-  <script src="https://pixijs.download/release/pixi.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
   <script src="https://d3js.org/d3.v7.min.js"></script>
 
   <style>
@@ -19,8 +19,7 @@
       --muted: #94a3b8;
       --accent: #60a5fa;
       --accent-2: #a78bfa;
-      --accent-3: #22c55e;
-      --danger: #f59e0b;
+      --danger: #ef4444;
       --shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
       --radius: 14px;
     }
@@ -48,9 +47,7 @@
       position: relative;
       flex: 1;
       overflow: hidden;
-      background:
-        radial-gradient(circle at center, rgba(96,165,250,0.04), transparent 35%),
-        transparent;
+      min-width: 0;
     }
 
     #topbar {
@@ -82,7 +79,6 @@
       margin: 0 0 10px;
       font-size: 18px;
       font-weight: 700;
-      letter-spacing: -0.02em;
     }
 
     .filter-row {
@@ -107,11 +103,6 @@
       padding: 7px 12px;
       font-size: 12px;
       cursor: pointer;
-      transition: 0.16s ease;
-    }
-
-    .chip:hover {
-      background: rgba(255,255,255,0.07);
     }
 
     .chip.active {
@@ -154,11 +145,6 @@
       color: var(--text);
       cursor: pointer;
       font-size: 15px;
-      transition: 0.16s ease;
-    }
-
-    .btn:hover {
-      background: rgba(255,255,255,0.08);
     }
 
     .btn.toggle.active {
@@ -166,9 +152,30 @@
       border-color: rgba(96,165,250,0.45);
     }
 
-    #bottom-summary {
+    #statusBox {
       position: absolute;
       left: 14px;
+      bottom: 14px;
+      z-index: 25;
+      max-width: 520px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border);
+      color: #cbd5e1;
+      font-size: 13px;
+      white-space: pre-wrap;
+      line-height: 1.5;
+    }
+
+    #statusBox.error {
+      border-color: rgba(239, 68, 68, 0.45);
+      color: #fecaca;
+    }
+
+    #bottom-summary {
+      position: absolute;
+      right: 14px;
       bottom: 14px;
       z-index: 20;
       display: flex;
@@ -177,7 +184,7 @@
     }
 
     .summary-card {
-      width: 140px;
+      width: 120px;
       padding: 14px;
       border-radius: var(--radius);
       border: 1px solid var(--border);
@@ -194,9 +201,8 @@
     }
 
     .summary-value {
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 800;
-      letter-spacing: -0.03em;
     }
 
     #side-panel {
@@ -207,11 +213,6 @@
       border-left: 1px solid var(--border);
       padding: 18px 16px;
       overflow-y: auto;
-    }
-
-    #side-panel h2 {
-      margin: 0 0 14px;
-      font-size: 20px;
     }
 
     .info-card {
@@ -234,10 +235,6 @@
       word-break: break-word;
     }
 
-    .meta b {
-      color: #dbeafe;
-    }
-
     .description {
       white-space: pre-wrap;
       word-break: break-word;
@@ -251,7 +248,6 @@
       color: #dbeafe;
       font-size: 13px;
       font-weight: 700;
-      letter-spacing: 0.02em;
       text-transform: uppercase;
     }
 
@@ -265,14 +261,7 @@
       padding: 10px 12px;
       border-radius: 10px;
       background: rgba(255,255,255,0.04);
-      border: 1px solid transparent;
       cursor: pointer;
-      transition: 0.16s ease;
-    }
-
-    .related-item:hover {
-      background: rgba(255,255,255,0.08);
-      border-color: var(--border);
     }
 
     .related-item small {
@@ -289,10 +278,6 @@
     a {
       color: #93c5fd;
       text-decoration: none;
-    }
-
-    a:hover {
-      text-decoration: underline;
     }
   </style>
 </head>
@@ -320,12 +305,14 @@
         </div>
 
         <div id="controlBox" class="panel">
-          <button id="zoomOutBtn" class="btn" type="button" title="줌아웃">−</button>
-          <button id="zoomInBtn" class="btn" type="button" title="줌인">+</button>
-          <button id="resetBtn" class="btn" type="button" title="기본 보기">↺</button>
+          <button id="zoomOutBtn" class="btn" type="button">−</button>
+          <button id="zoomInBtn" class="btn" type="button">+</button>
+          <button id="resetBtn" class="btn" type="button">↺</button>
         </div>
       </div>
     </div>
+
+    <div id="statusBox">초기화 중...</div>
 
     <div id="bottom-summary">
       <div class="summary-card">
@@ -364,15 +351,19 @@
     let localMode = false;
     let localDepth = 1;
     let currentScale = 1;
-
     let activeGroup = "전체";
     let activeStatus = "전체";
 
     let app, container, edgeLayer, nodeLayer, labelLayer, simulation;
     let nodeSprites = [];
-
     let isPanning = false;
     let panStart = { x: 0, y: 0 };
+
+    function setStatus(message, isError = false) {
+      const box = document.getElementById("statusBox");
+      box.textContent = message;
+      box.classList.toggle("error", isError);
+    }
 
     function parseCSV(text) {
       text = text.replace(/^\uFEFF/, "");
@@ -408,8 +399,10 @@
 
       row.push(field);
       if (row.some(v => v !== "")) rows.push(row);
+      if (!rows.length) return [];
 
       const headers = (rows[0] || []).map(v => String(v).trim());
+
       return rows.slice(1).map(cols => {
         const obj = {};
         headers.forEach((h, idx) => {
@@ -425,9 +418,13 @@
 
       nodes.forEach(n => {
         if (!n.links) return;
-        String(n.links).split(",").map(v => v.trim()).filter(Boolean).forEach(target => {
-          if (map.has(target)) edges.push({ source: n.id, target });
-        });
+        String(n.links)
+          .split(",")
+          .map(v => v.trim())
+          .filter(Boolean)
+          .forEach(target => {
+            if (map.has(target)) edges.push({ source: n.id, target });
+          });
       });
 
       return edges;
@@ -452,35 +449,16 @@
       return Array.from(adjacency.get(id) || []).map(getNodeById).filter(Boolean);
     }
 
+    function isMainNode(node) {
+      return String(node.group || "").toLowerCase().includes("main") || String(node.id || "").toLowerCase() === "main";
+    }
+
     function getFilteredNodes() {
       return allNodes.filter(n => {
         const groupPass = activeGroup === "전체" || (n.group || "미분류") === activeGroup;
         const statusPass = activeStatus === "전체" || (n["진행현황"] || "미정") === activeStatus;
         return groupPass && statusPass;
       });
-    }
-
-    function getFilteredGraph() {
-      const filteredNodes = getFilteredNodes();
-      const ids = new Set(filteredNodes.map(n => n.id));
-      let filteredEdges = allEdges.filter(e => ids.has(e.source) && ids.has(e.target));
-
-      if (localMode && selectedNode && ids.has(selectedNode.id)) {
-        const localIds = getLocalIds(selectedNode.id, filteredEdges, localDepth);
-        const localNodes = filteredNodes.filter(n => localIds.has(n.id));
-        filteredEdges = filteredEdges.filter(e => localIds.has(e.source) && localIds.has(e.target));
-        return {
-          nodes: localNodes,
-          edges: filteredEdges,
-          ids: localIds
-        };
-      }
-
-      return {
-        nodes: filteredNodes,
-        edges: filteredEdges,
-        ids
-      };
     }
 
     function getLocalIds(centerId, edges, depth = 1) {
@@ -502,13 +480,32 @@
       return visited;
     }
 
+    function getFilteredGraph() {
+      const filteredNodes = getFilteredNodes();
+      const ids = new Set(filteredNodes.map(n => n.id));
+      let filteredEdges = allEdges.filter(e => ids.has(e.source) && ids.has(e.target));
+
+      if (localMode && selectedNode && ids.has(selectedNode.id)) {
+        const localIds = getLocalIds(selectedNode.id, filteredEdges, localDepth);
+        return {
+          ids: localIds,
+          edges: filteredEdges.filter(e => localIds.has(e.source) && localIds.has(e.target))
+        };
+      }
+
+      return { ids, edges: filteredEdges };
+    }
+
     function setupPixi() {
       const wrap = document.getElementById("graph-wrap");
 
       app = new PIXI.Application({
-        resizeTo: wrap,
+        width: wrap.clientWidth,
+        height: wrap.clientHeight,
         backgroundAlpha: 0,
-        antialias: true
+        antialias: true,
+        resolution: window.devicePixelRatio || 1,
+        autoDensity: true
       });
 
       wrap.appendChild(app.view);
@@ -532,6 +529,10 @@
       app.view.addEventListener("mousedown", onPanStart);
       window.addEventListener("mousemove", onPanMove);
       window.addEventListener("mouseup", onPanEnd);
+      window.addEventListener("resize", () => {
+        const wrap = document.getElementById("graph-wrap");
+        app.renderer.resize(wrap.clientWidth, wrap.clientHeight);
+      });
 
       app.ticker.add(renderScene);
     }
@@ -545,11 +546,8 @@
         .velocityDecay(0.36)
         .force("link", d3.forceLink(allEdges).id(d => d.id).distance(110).strength(0.14))
         .force("charge", d3.forceManyBody().strength(-260))
-        .force("center", d3.forceCenter(window.innerWidth * 0.28, window.innerHeight * 0.5))
-        .force("collision", d3.forceCollide().radius(d => {
-          const isMain = isMainNode(d);
-          return isMain ? 18 : 11;
-        }));
+        .force("center", d3.forceCenter(420, window.innerHeight * 0.5))
+        .force("collision", d3.forceCollide().radius(d => isMainNode(d) ? 18 : 11));
 
       simulation.on("tick", () => {
         if (simulation.alpha() < 0.02) simulation.alpha(0.024);
@@ -584,20 +582,16 @@
       });
     }
 
-    function isMainNode(node) {
-      return String(node.group || "").toLowerCase().includes("main") || String(node.id || "").toLowerCase() === "main";
-    }
-
     function renderScene() {
       if (!edgeLayer) return;
 
       const graph = getFilteredGraph();
       const visibleIds = graph.ids;
       const visibleEdges = graph.edges;
-
       const neighbors = selectedNode ? new Set(getNeighbors(selectedNode.id).map(n => n.id)) : new Set();
 
       edgeLayer.clear();
+
       visibleEdges.forEach(e => {
         const s = getNodeById(e.source);
         const t = getNodeById(e.target);
@@ -641,7 +635,6 @@
         item.g.beginFill(color, alpha);
         item.g.drawCircle(0, 0, radius);
         item.g.endFill();
-
         item.g.x = n.x;
         item.g.y = n.y;
         item.label.x = n.x;
@@ -665,14 +658,11 @@
       const groups = ["전체", ...new Set(allNodes.map(n => n.group || "미분류"))];
       const statuses = ["전체", ...new Set(allNodes.map(n => n["진행현황"] || "미정"))];
 
-      const groupBox = document.getElementById("groupFilters");
-      const statusBox = document.getElementById("statusFilters");
-
-      groupBox.innerHTML = groups.map(v =>
+      document.getElementById("groupFilters").innerHTML = groups.map(v =>
         `<button class="chip ${v === activeGroup ? "active" : ""}" data-type="group" data-value="${escapeAttr(v)}">${escapeHtml(v)}</button>`
       ).join("");
 
-      statusBox.innerHTML = statuses.map(v =>
+      document.getElementById("statusFilters").innerHTML = statuses.map(v =>
         `<button class="chip ${v === activeStatus ? "active" : ""}" data-type="status" data-value="${escapeAttr(v)}">${escapeHtml(v)}</button>`
       ).join("");
 
@@ -682,20 +672,9 @@
           const value = el.getAttribute("data-value");
           if (type === "group") activeGroup = value;
           if (type === "status") activeStatus = value;
-
           renderFilters();
           updateSummary();
-
-          if (selectedNode) {
-            const stillVisible = getFilteredNodes().some(n => n.id === selectedNode.id);
-            if (!stillVisible) selectedNode = null;
-          }
-
           updateInfoPanel();
-          if (simulation) {
-            simulation.alphaTarget(0.08).restart();
-            setTimeout(() => simulation && simulation.alphaTarget(0.02), 400);
-          }
         });
       });
     }
@@ -709,13 +688,7 @@
       }
 
       const node = getNodeById(selectedNode.id);
-      if (!node) return;
-
-      const neighbors = getNeighbors(node.id).filter(n => {
-        const groupPass = activeGroup === "전체" || (n.group || "미분류") === activeGroup;
-        const statusPass = activeStatus === "전체" || (n["진행현황"] || "미정") === activeStatus;
-        return groupPass && statusPass;
-      });
+      const neighbors = getNeighbors(node.id);
 
       info.innerHTML = `
         <div class="info-card">
@@ -754,16 +727,9 @@
     function selectNode(id, focus = false) {
       const node = getNodeById(id);
       if (!node) return;
-
       selectedNode = node;
       updateInfoPanel();
-
       if (focus) focusOnNode(node);
-
-      if (simulation) {
-        simulation.alphaTarget(0.09).restart();
-        setTimeout(() => simulation && simulation.alphaTarget(0.02), 450);
-      }
     }
 
     function focusOnNode(node) {
@@ -786,9 +752,7 @@
     function onWheel(e) {
       e.preventDefault();
       const rect = app.view.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const y = e.clientY - rect.top;
-      applyZoom(e.deltaY > 0 ? 0.9 : 1.1, x, y);
+      applyZoom(e.deltaY > 0 ? 0.9 : 1.1, e.clientX - rect.left, e.clientY - rect.top);
     }
 
     function onPanStart(e) {
@@ -814,13 +778,7 @@
       const wrap = document.getElementById("graph-wrap");
       container.x = wrap.clientWidth * 0.08;
       container.y = wrap.clientHeight * 0.08;
-
       if (selectedNode) focusOnNode(selectedNode);
-
-      if (simulation) {
-        simulation.alphaTarget(0.1).restart();
-        setTimeout(() => simulation && simulation.alphaTarget(0.02), 500);
-      }
     }
 
     function bindUi() {
@@ -839,23 +797,17 @@
       document.getElementById("searchInput").addEventListener("input", (e) => {
         const q = String(e.target.value || "").trim().toLowerCase();
         if (!q) return;
-
         const found = allNodes.find(n =>
           String(n.label || "").toLowerCase().includes(q) ||
           String(n.id || "").toLowerCase().includes(q) ||
           String(n.description || "").toLowerCase().includes(q)
         );
-
         if (found) selectNode(found.id, true);
       });
 
       document.getElementById("localBtn").addEventListener("click", () => {
         localMode = !localMode;
         document.getElementById("localBtn").classList.toggle("active", localMode);
-        if (simulation) {
-          simulation.alphaTarget(0.08).restart();
-          setTimeout(() => simulation && simulation.alphaTarget(0.02), 400);
-        }
       });
     }
 
@@ -873,11 +825,23 @@
     }
 
     async function init() {
+      setStatus("CSV 데이터를 불러오는 중...");
       setupPixi();
       bindUi();
 
-      const csv = await fetch(NODES_URL).then(r => r.text());
+      const res = await fetch(NODES_URL);
+      if (!res.ok) {
+        throw new Error(`CSV 요청 실패: HTTP ${res.status}`);
+      }
+
+      const csv = await res.text();
       allNodes = parseCSV(csv);
+      if (!allNodes.length) {
+        throw new Error("nodes 시트가 비어 있거나 CSV 파싱에 실패했습니다.");
+      }
+
+      setStatus(`노드 ${allNodes.length}개 로드 완료. edges 생성 중...`);
+
       allEdges = buildEdges(allNodes);
       adjacency = buildAdjacency(allEdges);
 
@@ -892,10 +856,12 @@
       }
 
       resetView();
+      setStatus(`정상 로드 완료: nodes ${allNodes.length}, edges ${allEdges.length}`);
     }
 
     init().catch(err => {
       console.error(err);
+      setStatus(`그래프 로드 실패\n${err.message}`, true);
       document.getElementById("info").innerHTML = `<div class="empty">데이터를 불러오지 못했습니다.</div>`;
     });
   </script>
