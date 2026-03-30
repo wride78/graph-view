@@ -1,265 +1,733 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-<meta charset="utf-8">
-<title>Obsidian Graph WebGL</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Obsidian-style Graph</title>
 
-<script src="https://pixijs.download/release/pixi.min.js"></script>
-<script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://pixijs.download/release/pixi.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
 
-<style>
-body { margin:0; display:flex; background:#0f1117; color:white; }
-#panel { width:300px; background:#1a1d25; padding:10px; overflow:auto; }
-#ui { position:absolute; top:10px; left:10px; z-index:10; }
-input { padding:5px; }
-button { margin-left:5px; }
-</style>
-</head>
-
-<body>
-
-<div id="ui">
-  <input id="search" placeholder="Search..." />
-  <button onclick="toggleLocal()">Local</button>
-  <button onclick="resetView()">Reset</button>
-</div>
-
-<div id="panel">
-  <h3>Node Info</h3>
-  <div id="info">Select node</div>
-</div>
-
-<script>
-
-/* =====================
-   CONFIG
-===================== */
-const SHEET_ID = atob("MTBNeGkzWndCejJiN0FnRi16RHJvUlpocWhUZnNHZE1EbWJPdldYaXYyUTg=");
-const URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=nodes`;
-
-/* =====================
-   CSV SAFE PARSER
-===================== */
-function parseCSV(text) {
-  text = text.replace(/^\uFEFF/, "");
-  const rows = [];
-  let cur = [], field="", quote=false;
-
-  for (let c of text) {
-    if (c === '"') quote = !quote;
-    else if (c === ',' && !quote) { cur.push(field); field=""; }
-    else if ((c === '\n' || c === '\r') && !quote) {
-      if(field||cur.length){cur.push(field);rows.push(cur);}
-      cur=[];field="";
-    } else field+=c;
-  }
-  if(field) cur.push(field);
-  if(cur.length) rows.push(cur);
-
-  const headers = rows[0];
-  return rows.slice(1).map(r=>{
-    let o={};
-    headers.forEach((h,i)=>o[h.trim()]=(r[i]||"").trim());
-    return o;
-  });
-}
-
-/* =====================
-   BUILD EDGES
-===================== */
-function buildEdges(nodes){
-  const map=new Map(nodes.map(n=>[n.id,n]));
-  const edges=[];
-  nodes.forEach(n=>{
-    if(!n.links) return;
-    n.links.split(",").forEach(t=>{
-      t=t.trim();
-      if(map.has(t)) edges.push({source:n.id,target:t});
-    });
-  });
-  return edges;
-}
-
-/* =====================
-   ADJACENCY
-===================== */
-function buildAdj(edges){
-  const m=new Map();
-  edges.forEach(e=>{
-    if(!m.has(e.source)) m.set(e.source,new Set());
-    if(!m.has(e.target)) m.set(e.target,new Set());
-    m.get(e.source).add(e.target);
-    m.get(e.target).add(e.source);
-  });
-  return m;
-}
-
-/* =====================
-   LOCAL GRAPH
-===================== */
-function localGraph(nodes,edges,id,depth=1){
-  const visited=new Set([id]);
-  const q=[{id,level:0}];
-
-  while(q.length){
-    const {id,level}=q.shift();
-    if(level>=depth) continue;
-
-    edges.forEach(e=>{
-      const next = e.source===id?e.target:e.target===id?e.source:null;
-      if(next&&!visited.has(next)){
-        visited.add(next);
-        q.push({id:next,level:level+1});
-      }
-    });
-  }
-
-  return {
-    nodes:nodes.filter(n=>visited.has(n.id)),
-    edges:edges.filter(e=>visited.has(e.source)&&visited.has(e.target))
-  };
-}
-
-/* =====================
-   MAIN
-===================== */
-fetch(URL).then(r=>r.text()).then(csv=>{
-  const nodes=parseCSV(csv);
-  const edges=buildEdges(nodes);
-  const adj=buildAdj(edges);
-
-  run(nodes,edges,adj);
-});
-
-/* =====================
-   GRAPH (PIXI)
-===================== */
-function run(nodes,edges,adj){
-
-  let activeNodes=nodes;
-  let activeEdges=edges;
-
-  let selected=null;
-  let localMode=false;
-
-  const app=new PIXI.Application({resizeTo:window,background:"#0f1117"});
-  document.body.appendChild(app.view);
-
-  const container=new PIXI.Container();
-  app.stage.addChild(container);
-
-  /* ZOOM */
-  let scale=1;
-  app.view.addEventListener("wheel",e=>{
-    e.preventDefault();
-    const s=e.deltaY>0?0.9:1.1;
-    scale*=s;
-    container.scale.set(scale);
-  });
-
-  /* PAN */
-  let drag=false,last={x:0,y:0};
-  app.view.addEventListener("mousedown",e=>{drag=true;last={x:e.clientX,y:e.clientY}});
-  app.view.addEventListener("mouseup",()=>drag=false);
-  app.view.addEventListener("mousemove",e=>{
-    if(!drag) return;
-    container.x+=e.clientX-last.x;
-    container.y+=e.clientY-last.y;
-    last={x:e.clientX,y:e.clientY};
-  });
-
-  /* SIMULATION */
-  const sim=d3.forceSimulation(nodes)
-    .force("link",d3.forceLink(edges).id(d=>d.id).distance(80))
-    .force("charge",d3.forceManyBody().strength(-150))
-    .force("center",d3.forceCenter(window.innerWidth/2,window.innerHeight/2));
-
-  setTimeout(()=>sim.stop(),3000);
-
-  const nodeSprites=[];
-  const edgeGraphics=new PIXI.Graphics();
-  container.addChild(edgeGraphics);
-
-  nodes.forEach(n=>{
-    const g=new PIXI.Graphics();
-    g.beginFill(0x8fa1c7).drawCircle(0,0,4).endFill();
-    g.interactive=true;
-
-    g.on("pointerdown",()=>{
-      selected=n;
-      updatePanel(n);
-      if(localMode){
-        const sub=localGraph(nodes,edges,n.id,2);
-        activeNodes=sub.nodes;
-        activeEdges=sub.edges;
-      }
-    });
-
-    nodeSprites.push({node:n,g});
-    container.addChild(g);
-  });
-
-  function updatePanel(n){
-    document.getElementById("info").innerHTML=`
-      <h3>${n.label}</h3>
-      <p>${n.description||""}</p>
-      <p>${n["작성자"]||""}</p>
-      <p>${n["진행현황"]||""}</p>
-    `;
-  }
-
-  function render(){
-    edgeGraphics.clear();
-
-    const neighbors=adj.get(selected?.id)||new Set();
-
-    activeEdges.forEach(e=>{
-      const s=nodes.find(n=>n.id===e.source);
-      const t=nodes.find(n=>n.id===e.target);
-
-      edgeGraphics.lineStyle(1,0xffffff,0.2);
-      edgeGraphics.moveTo(s.x,s.y);
-      edgeGraphics.lineTo(t.x,t.y);
-    });
-
-    nodeSprites.forEach(o=>{
-      const n=o.node;
-      o.g.x=n.x;
-      o.g.y=n.y;
-
-      if(selected===n) o.g.tint=0xffffff, o.g.scale.set(2);
-      else if(neighbors.has(n.id)) o.g.tint=0x88aaff, o.g.scale.set(1.5);
-      else o.g.tint=0x555577, o.g.scale.set(1);
-    });
-  }
-
-  app.ticker.add(render);
-
-  /* SEARCH */
-  document.getElementById("search").addEventListener("input",e=>{
-    const q=e.target.value.toLowerCase();
-    const f=nodes.find(n=>n.label.toLowerCase().includes(q));
-    if(f){
-      selected=f;
-      updatePanel(f);
-      container.x=window.innerWidth/2-f.x*scale;
-      container.y=window.innerHeight/2-f.y*scale;
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #0f1117;
+      color: #fff;
+      font-family: Arial, sans-serif;
     }
-  });
 
-  window.toggleLocal=()=>{
-    localMode=!localMode;
-    activeNodes=nodes;
-    activeEdges=edges;
-  }
+    body {
+      display: flex;
+    }
 
-  window.resetView=()=>{
-    container.x=0;container.y=0;scale=1;
-    container.scale.set(1);
-  }
+    #graph-wrap {
+      position: relative;
+      flex: 1;
+      background: #0f1117;
+    }
 
-}
+    #controls {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+    }
 
-</script>
+    #controls button {
+      width: 38px;
+      height: 38px;
+      border: 0;
+      border-radius: 10px;
+      background: rgba(26, 29, 37, 0.92);
+      color: #fff;
+      font-size: 18px;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    }
+
+    #controls button:hover {
+      background: rgba(47, 52, 66, 0.95);
+    }
+
+    #toolbar {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      z-index: 20;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #search {
+      width: 220px;
+      height: 38px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 10px;
+      outline: none;
+      background: rgba(26, 29, 37, 0.92);
+      color: #fff;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    }
+
+    #localToggle {
+      height: 38px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 10px;
+      background: rgba(26, 29, 37, 0.92);
+      color: #fff;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+    }
+
+    #localToggle.active {
+      background: #34405f;
+    }
+
+    #side-panel {
+      width: 340px;
+      min-width: 340px;
+      max-width: 340px;
+      background: #1a1d25;
+      border-left: 1px solid rgba(255,255,255,0.06);
+      box-sizing: border-box;
+      padding: 18px 16px;
+      overflow-y: auto;
+    }
+
+    #side-panel h2 {
+      margin: 0 0 14px;
+      font-size: 20px;
+    }
+
+    .meta {
+      margin: 6px 0;
+      line-height: 1.45;
+      word-break: break-word;
+    }
+
+    .meta b {
+      color: #cbd5e1;
+    }
+
+    .description {
+      margin: 12px 0 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .link-list {
+      margin-top: 14px;
+      padding-top: 12px;
+      border-top: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .link-item {
+      padding: 8px 10px;
+      margin: 6px 0;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.04);
+      cursor: pointer;
+    }
+
+    .link-item:hover {
+      background: rgba(255,255,255,0.08);
+    }
+
+    a {
+      color: #93c5fd;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    #empty {
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div id="graph-wrap">
+    <div id="toolbar">
+      <input id="search" type="text" placeholder="노드 검색" />
+      <button id="localToggle" type="button">Local Graph</button>
+    </div>
+
+    <div id="controls">
+      <button id="zoomOut" type="button" title="Zoom Out">−</button>
+      <button id="zoomIn" type="button" title="Zoom In">+</button>
+      <button id="resetView" type="button" title="Reset">⟳</button>
+    </div>
+  </div>
+
+  <aside id="side-panel">
+    <h2>Node Info</h2>
+    <div id="info">
+      <div id="empty">그래프에서 노드를 선택하면 상세 정보와 관련 links 노드가 표시됩니다.</div>
+    </div>
+  </aside>
+
+  <script>
+    const SHEET_ID = atob("MTBNeGkzWndCejJiN0FnRi16RHJvUlpocWhUZnNHZE1EbWJPdldYaXYyUTg=");
+    const NODES_URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=nodes`;
+
+    let rawNodes = [];
+    let rawEdges = [];
+    let adjacency = new Map();
+
+    let selectedNode = null;
+    let localMode = false;
+    let localDepth = 1;
+
+    let app;
+    let container;
+    let edgeLayer;
+    let labelLayer;
+    let nodeLayer;
+    let nodeSprites = [];
+    let nodeTextMap = new Map();
+
+    let simulation;
+    let currentScale = 1;
+    let isPanning = false;
+    let panStart = { x: 0, y: 0 };
+
+    function parseCSV(text) {
+      text = text.replace(/^\uFEFF/, "");
+
+      const rows = [];
+      let row = [];
+      let field = "";
+      let inQuotes = false;
+
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const next = text[i + 1];
+
+        if (ch === '"') {
+          if (inQuotes && next === '"') {
+            field += '"';
+            i++;
+          } else {
+            inQuotes = !inQuotes;
+          }
+        } else if (ch === ',' && !inQuotes) {
+          row.push(field);
+          field = "";
+        } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
+          if (ch === '\r' && next === '\n') i++;
+          row.push(field);
+          if (row.some(v => v !== "")) rows.push(row);
+          row = [];
+          field = "";
+        } else {
+          field += ch;
+        }
+      }
+
+      row.push(field);
+      if (row.some(v => v !== "")) rows.push(row);
+
+      if (!rows.length) return [];
+
+      const headers = rows[0].map(v => String(v).trim());
+
+      return rows.slice(1).map(cols => {
+        const obj = {};
+        headers.forEach((h, idx) => {
+          obj[h] = (cols[idx] ?? "").trim();
+        });
+        return obj;
+      });
+    }
+
+    function buildEdges(nodes) {
+      const nodeMap = new Map(nodes.map(n => [n.id, n]));
+      const result = [];
+
+      for (const node of nodes) {
+        if (!node.links) continue;
+
+        const targets = String(node.links)
+          .split(",")
+          .map(v => v.trim())
+          .filter(Boolean);
+
+        for (const targetId of targets) {
+          if (!nodeMap.has(targetId)) continue;
+          result.push({
+            source: node.id,
+            target: targetId
+          });
+        }
+      }
+
+      return result;
+    }
+
+    function buildAdjacency(edges) {
+      const map = new Map();
+
+      for (const e of edges) {
+        if (!map.has(e.source)) map.set(e.source, new Set());
+        if (!map.has(e.target)) map.set(e.target, new Set());
+
+        map.get(e.source).add(e.target);
+        map.get(e.target).add(e.source);
+      }
+
+      return map;
+    }
+
+    function getNodeById(id) {
+      return rawNodes.find(n => n.id === id) || null;
+    }
+
+    function getNeighbors(nodeId) {
+      const neighborIds = Array.from(adjacency.get(nodeId) || []);
+      return neighborIds
+        .map(id => getNodeById(id))
+        .filter(Boolean);
+    }
+
+    function getLocalGraph(nodes, edges, centerId, depth = 1) {
+      const visited = new Set([centerId]);
+      const queue = [{ id: centerId, level: 0 }];
+
+      while (queue.length) {
+        const { id, level } = queue.shift();
+        if (level >= depth) continue;
+
+        for (const e of edges) {
+          let next = null;
+          if (e.source === id) next = e.target;
+          else if (e.target === id) next = e.source;
+
+          if (next && !visited.has(next)) {
+            visited.add(next);
+            queue.push({ id: next, level: level + 1 });
+          }
+        }
+      }
+
+      return {
+        nodeIds: visited,
+        nodes: nodes.filter(n => visited.has(n.id)),
+        edges: edges.filter(e => visited.has(e.source) && visited.has(e.target))
+      };
+    }
+
+    function setupPixi() {
+      const wrap = document.getElementById("graph-wrap");
+
+      app = new PIXI.Application({
+        resizeTo: wrap,
+        background: "#0f1117",
+        antialias: true
+      });
+
+      wrap.appendChild(app.view);
+
+      app.view.style.position = "absolute";
+      app.view.style.left = "0";
+      app.view.style.top = "0";
+      app.view.style.width = "100%";
+      app.view.style.height = "100%";
+
+      container = new PIXI.Container();
+      edgeLayer = new PIXI.Graphics();
+      labelLayer = new PIXI.Container();
+      nodeLayer = new PIXI.Container();
+
+      container.addChild(edgeLayer);
+      container.addChild(labelLayer);
+      container.addChild(nodeLayer);
+      app.stage.addChild(container);
+
+      app.view.addEventListener("wheel", onWheel, { passive: false });
+      app.view.addEventListener("mousedown", onPanStart);
+      window.addEventListener("mousemove", onPanMove);
+      window.addEventListener("mouseup", onPanEnd);
+
+      document.getElementById("zoomIn").addEventListener("click", () => zoomBy(1.15));
+      document.getElementById("zoomOut").addEventListener("click", () => zoomBy(0.87));
+      document.getElementById("resetView").addEventListener("click", resetView);
+      document.getElementById("search").addEventListener("input", onSearch);
+      document.getElementById("localToggle").addEventListener("click", toggleLocalGraph);
+
+      app.ticker.add(renderScene);
+    }
+
+    function createSimulation(nodes, edges) {
+      if (simulation) simulation.stop();
+
+      simulation = d3.forceSimulation(nodes)
+        .alpha(0.9)
+        .alphaDecay(0.03)
+        .velocityDecay(0.35)
+        .force("link", d3.forceLink(edges).id(d => d.id).distance(110).strength(0.15))
+        .force("charge", d3.forceManyBody().strength(-240))
+        .force("center", d3.forceCenter(window.innerWidth * 0.28, window.innerHeight * 0.5))
+        .force("collision", d3.forceCollide().radius(d => selectedNode && d.id === selectedNode.id ? 24 : 14));
+
+      simulation.on("tick", () => {
+        // 움직임 유지. 너무 과하면 자연스럽게 다시 데워질 수 있도록 alpha 최소치 보정
+        if (simulation.alpha() < 0.02) {
+          simulation.alpha(0.025);
+        }
+      });
+    }
+
+    function createNodeSprites() {
+      nodeLayer.removeChildren();
+      labelLayer.removeChildren();
+      nodeSprites = [];
+      nodeTextMap.clear();
+
+      for (const node of rawNodes) {
+        const g = new PIXI.Graphics();
+        g.eventMode = "static";
+        g.cursor = "pointer";
+
+        g.on("pointerdown", (event) => {
+          event.stopPropagation();
+          selectNode(node.id, true);
+        });
+
+        const text = new PIXI.Text(node.label || node.id, {
+          fill: 0xdbeafe,
+          fontSize: 12,
+          fontFamily: "Arial",
+          align: "left"
+        });
+        text.anchor.set(0.5, 1.8);
+        text.visible = false;
+
+        nodeLayer.addChild(g);
+        labelLayer.addChild(text);
+
+        nodeSprites.push({ node, g, text });
+        nodeTextMap.set(node.id, text);
+      }
+    }
+
+    function renderScene() {
+      if (!edgeLayer) return;
+
+      const graphState = getVisibleGraphState();
+      const visibleNodeIds = graphState.nodeIds;
+      const visibleEdges = graphState.edges;
+
+      const neighbors = selectedNode ? new Set(getNeighbors(selectedNode.id).map(n => n.id)) : new Set();
+
+      edgeLayer.clear();
+
+      for (const e of visibleEdges) {
+        const s = getNodeById(e.source);
+        const t = getNodeById(e.target);
+        if (!s || !t) continue;
+
+        const isSelectedEdge = selectedNode && (e.source === selectedNode.id || e.target === selectedNode.id);
+        const alpha = selectedNode ? (isSelectedEdge ? 0.6 : 0.08) : 0.22;
+        const width = isSelectedEdge ? 2 : 1;
+
+        edgeLayer.lineStyle(width, 0xcbd5e1, alpha);
+        edgeLayer.moveTo(s.x, s.y);
+        edgeLayer.lineTo(t.x, t.y);
+      }
+
+      for (const item of nodeSprites) {
+        const n = item.node;
+        const visible = visibleNodeIds.has(n.id);
+        item.g.visible = visible;
+        item.text.visible = false;
+
+        if (!visible) continue;
+
+        const isSelected = selectedNode && selectedNode.id === n.id;
+        const isNeighbor = selectedNode && neighbors.has(n.id);
+        const isMain = String(n.group || "").toLowerCase().includes("main") || String(n.id || "").toLowerCase() === "main";
+
+        let radius = 5;
+        let alpha = 0.95;
+        let color = 0x8fa1c7;
+
+        if (isMain) {
+          radius = 9;
+          color = 0xfbbf24;
+        }
+
+        if (isSelected) {
+          radius = 13;
+          color = 0xffffff;
+          alpha = 1;
+        } else if (isNeighbor) {
+          radius = Math.max(radius, 8);
+          color = 0x93c5fd;
+          alpha = 1;
+        } else if (selectedNode) {
+          alpha = 0.22;
+        }
+
+        item.g.clear();
+        item.g.beginFill(color, alpha);
+        item.g.drawCircle(0, 0, radius);
+        item.g.endFill();
+
+        item.g.x = n.x;
+        item.g.y = n.y;
+
+        item.text.x = n.x;
+        item.text.y = n.y;
+
+        if (selectedNode && (isSelected || isNeighbor)) {
+          item.text.visible = true;
+        } else if (!selectedNode && currentScale > 1.25) {
+          item.text.visible = true;
+        }
+      }
+    }
+
+    function getVisibleGraphState() {
+      if (localMode && selectedNode) {
+        const sub = getLocalGraph(rawNodes, rawEdges, selectedNode.id, localDepth);
+        return {
+          nodeIds: sub.nodeIds,
+          nodes: sub.nodes,
+          edges: sub.edges
+        };
+      }
+
+      return {
+        nodeIds: new Set(rawNodes.map(n => n.id)),
+        nodes: rawNodes,
+        edges: rawEdges
+      };
+    }
+
+    function updatePanel(nodeId) {
+      const node = getNodeById(nodeId);
+      const info = document.getElementById("info");
+
+      if (!node) {
+        info.innerHTML = `<div id="empty">노드를 선택하면 정보가 표시됩니다.</div>`;
+        return;
+      }
+
+      const neighbors = getNeighbors(node.id);
+
+      info.innerHTML = `
+        <h3 style="margin:0 0 12px;">${escapeHtml(node.label || node.id)}</h3>
+        <div class="meta"><b>ID:</b> ${escapeHtml(node.id || "-")}</div>
+        <div class="meta"><b>Group:</b> ${escapeHtml(node.group || "-")}</div>
+        <div class="meta"><b>작성자:</b> ${escapeHtml(node["작성자"] || "-")}</div>
+        <div class="meta"><b>진행현황:</b> ${escapeHtml(node["진행현황"] || "-")}</div>
+        <div class="description">${escapeHtml(node.description || "")}</div>
+        ${node.url ? `<div class="meta"><a href="${escapeAttr(node.url)}" target="_blank" rel="noopener noreferrer">관련 링크 열기</a></div>` : ""}
+        <div class="link-list">
+          <div style="margin-bottom:8px;"><b>Related Links Nodes</b></div>
+          ${
+            neighbors.length
+              ? neighbors.map(n => `
+                  <div class="link-item" data-node-id="${escapeAttr(n.id)}">
+                    ${escapeHtml(n.label || n.id)}
+                  </div>
+                `).join("")
+              : `<div class="meta">연결된 노드가 없습니다.</div>`
+          }
+        </div>
+      `;
+
+      info.querySelectorAll(".link-item").forEach(el => {
+        el.addEventListener("click", () => {
+          const id = el.getAttribute("data-node-id");
+          if (id) selectNode(id, true);
+        });
+      });
+    }
+
+    function selectNode(nodeId, focusNode = false) {
+      const node = getNodeById(nodeId);
+      if (!node) return;
+
+      selectedNode = node;
+      updatePanel(nodeId);
+
+      if (localMode) {
+        document.getElementById("localToggle").classList.add("active");
+      }
+
+      if (focusNode) {
+        focusOnNode(node);
+      }
+
+      if (simulation) {
+        simulation.alphaTarget(0.08).restart();
+        setTimeout(() => simulation && simulation.alphaTarget(0.02), 400);
+      }
+    }
+
+    function focusOnNode(node) {
+      const wrap = document.getElementById("graph-wrap");
+      const targetX = wrap.clientWidth * 0.5;
+      const targetY = wrap.clientHeight * 0.5;
+
+      container.x = targetX - (node.x * currentScale);
+      container.y = targetY - (node.y * currentScale);
+    }
+
+    function resetView() {
+      currentScale = 1;
+      container.scale.set(1, 1);
+
+      const wrap = document.getElementById("graph-wrap");
+      container.x = 0;
+      container.y = 0;
+
+      if (selectedNode) {
+        focusOnNode(selectedNode);
+      } else {
+        container.x = wrap.clientWidth * 0.08;
+        container.y = wrap.clientHeight * 0.08;
+      }
+
+      if (simulation) {
+        simulation.alphaTarget(0.1).restart();
+        setTimeout(() => simulation && simulation.alphaTarget(0.02), 500);
+      }
+    }
+
+    function zoomBy(multiplier) {
+      const wrap = document.getElementById("graph-wrap");
+      const centerX = wrap.clientWidth / 2;
+      const centerY = wrap.clientHeight / 2;
+      applyZoom(multiplier, centerX, centerY);
+    }
+
+    function onWheel(e) {
+      e.preventDefault();
+      const rect = app.view.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      applyZoom(factor, mx, my);
+    }
+
+    function applyZoom(factor, pivotX, pivotY) {
+      const nextScale = Math.max(0.35, Math.min(3.5, currentScale * factor));
+      const actualFactor = nextScale / currentScale;
+      if (actualFactor === 1) return;
+
+      container.x = pivotX - (pivotX - container.x) * actualFactor;
+      container.y = pivotY - (pivotY - container.y) * actualFactor;
+      currentScale = nextScale;
+      container.scale.set(currentScale, currentScale);
+    }
+
+    function onPanStart(e) {
+      if (e.target !== app.view) return;
+      isPanning = true;
+      panStart.x = e.clientX;
+      panStart.y = e.clientY;
+    }
+
+    function onPanMove(e) {
+      if (!isPanning) return;
+      const dx = e.clientX - panStart.x;
+      const dy = e.clientY - panStart.y;
+      container.x += dx;
+      container.y += dy;
+      panStart.x = e.clientX;
+      panStart.y = e.clientY;
+    }
+
+    function onPanEnd() {
+      isPanning = false;
+    }
+
+    function onSearch(e) {
+      const q = String(e.target.value || "").trim().toLowerCase();
+      if (!q) return;
+
+      const found = rawNodes.find(n =>
+        String(n.label || "").toLowerCase().includes(q) ||
+        String(n.id || "").toLowerCase().includes(q) ||
+        String(n.description || "").toLowerCase().includes(q)
+      );
+
+      if (found) {
+        selectNode(found.id, true);
+      }
+    }
+
+    function toggleLocalGraph() {
+      localMode = !localMode;
+      document.getElementById("localToggle").classList.toggle("active", localMode);
+
+      if (selectedNode && simulation) {
+        simulation.alphaTarget(0.08).restart();
+        setTimeout(() => simulation && simulation.alphaTarget(0.02), 400);
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value);
+    }
+
+    async function init() {
+      setupPixi();
+
+      try {
+        const csv = await fetch(NODES_URL).then(r => r.text());
+        rawNodes = parseCSV(csv);
+        rawEdges = buildEdges(rawNodes);
+        adjacency = buildAdjacency(rawEdges);
+
+        createNodeSprites();
+        createSimulation(rawNodes, rawEdges);
+
+        const mainNode =
+          rawNodes.find(n => String(n.group || "").toLowerCase().includes("main")) ||
+          rawNodes[0];
+
+        if (mainNode) {
+          selectedNode = mainNode;
+          updatePanel(mainNode.id);
+
+          setTimeout(() => {
+            resetView();
+            focusOnNode(mainNode);
+          }, 120);
+        } else {
+          resetView();
+        }
+      } catch (err) {
+        console.error(err);
+        document.getElementById("info").innerHTML = `<div id="empty">데이터를 불러오지 못했습니다.</div>`;
+      }
+    }
+
+    init();
+  </script>
 </body>
 </html>
