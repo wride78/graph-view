@@ -1,5 +1,5 @@
 export const SHEET_ID = atob("MTBNeGkzWndCejJiN0FnRi16RHJvUlpocWhUZnNHZE1EbWJPdldYaXYyUTg=");
-export const SHEET_NAME = "시트1";
+export const SHEET_NAME = "nodes";
 
 export const NODES_URL =
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(SHEET_NAME)}`;
