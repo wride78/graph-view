@@ -3,6 +3,8 @@ import { loadNodes, buildEdges, buildAdjacency } from "./data.js";
 import { setupPixi, createSimulation, createSprites, applyZoom } from "./graph.js";
 import { setStatus, updateSummary, renderFilters, updateInfoPanel } from "./ui.js";
 
+console.log("NODES_URL =", NODES_URL);
+
 const state = {
   allNodes: [],
   allEdges: [],
