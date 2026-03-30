@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <title>Graph View</title>
+
   <script src="https://d3js.org/d3.v7.min.js"></script>
+
   <style>
     body {
       margin: 0;
@@ -21,6 +23,7 @@
       width: 300px;
       background: #1a1d25;
       padding: 16px;
+      overflow-y: auto;
     }
   </style>
 </head>
@@ -34,92 +37,183 @@
 </div>
 
 <script>
+/* ================================
+   설정
+================================ */
 const SHEET_ID = "10Mxi3ZwBz2b7AgF-zDroRZhahTfsGdMDmbOvWXiv2Q8";
 
 const nodesUrl =
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=nodes`;
 
-const edgesUrl =
-  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=edges`;
 
+/* ================================
+   CSV 파서 (안정 버전)
+================================ */
 function csvToJson(csv) {
-  const [header, ...rows] = csv.trim().split("\n");
-  const headers = header.split(",");
+  const lines = csv.trim().split("\n");
 
-  return rows.map(r => {
-    const values = r.split(",");
+  const headers = lines[0]
+    .split(",")
+    .map(h => h.trim());
+
+  return lines.slice(1).map(line => {
+    const values = line.split(",");
     const obj = {};
-    headers.forEach((h, i) => obj[h] = values[i]);
+
+    headers.forEach((h, i) => {
+      obj[h] = values[i] ? values[i].trim() : "";
+    });
+
     return obj;
   });
 }
 
-Promise.all([
-  fetch(nodesUrl).then(r => r.text()),
-  fetch(edgesUrl).then(r => r.text())
-]).then(([nCsv, eCsv]) => {
 
-  const nodes = csvToJson(nCsv);
-  const edges = csvToJson(eCsv);
+/* ================================
+   links → edges 생성
+================================ */
+function buildEdges(nodes) {
+  const edges = [];
 
-  const canvas = document.getElementById("graph");
-  const ctx = canvas.getContext("2d");
+  nodes.forEach(node => {
+    if (!node.links) return;
 
-  canvas.width = window.innerWidth - 300;
-  canvas.height = window.innerHeight;
+    node.links.split(",").forEach(t => {
+      const target = t.trim();
 
-  const sim = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(edges).id(d => d.id).distance(100))
-    .force("charge", d3.forceManyBody().strength(-200))
-    .force("center", d3.forceCenter(canvas.width / 2, canvas.height / 2));
+      if (!target) return;
 
-  function draw(selected) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+      // 존재하는 노드만 연결
+      if (!nodes.find(n => n.id === target)) return;
 
-    // edges
-    ctx.strokeStyle = "rgba(200,200,200,0.2)";
-    edges.forEach(e => {
-      ctx.beginPath();
-      ctx.moveTo(e.source.x, e.source.y);
-      ctx.lineTo(e.target.x, e.target.y);
-      ctx.stroke();
+      edges.push({
+        source: node.id,
+        target: target
+      });
     });
-
-    // nodes
-    nodes.forEach(n => {
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, selected === n ? 8 : 5, 0, Math.PI * 2);
-      ctx.fillStyle = selected === n ? "#fff" : "#8fa1c7";
-      ctx.fill();
-    });
-  }
-
-  let selectedNode = null;
-
-  sim.on("tick", () => draw(selectedNode));
-
-  canvas.addEventListener("click", (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    selectedNode = nodes.find(n => {
-      const dx = n.x - x;
-      const dy = n.y - y;
-      return Math.sqrt(dx*dx + dy*dy) < 8;
-    });
-
-    if (selectedNode) {
-      document.getElementById("info").innerHTML = `
-        <h3>${selectedNode.label}</h3>
-        <p>ID: ${selectedNode.id}</p>
-        <p>Group: ${selectedNode.group || "-"}</p>
-        <p>${selectedNode.description || ""}</p>
-      `;
-    }
   });
 
-});
+  return edges;
+}
+
+
+/* ================================
+   메인 로직
+================================ */
+fetch(nodesUrl)
+  .then(r => r.text())
+  .then(csv => {
+
+    const nodes = csvToJson(csv);
+    const edges = buildEdges(nodes);
+
+    console.log("nodes:", nodes);
+    console.log("edges:", edges);
+
+    const canvas = document.getElementById("graph");
+    const ctx = canvas.getContext("2d");
+
+    canvas.width = window.innerWidth - 300;
+    canvas.height = window.innerHeight;
+
+    const simulation = d3.forceSimulation(nodes)
+      .force("link",
+        d3.forceLink(edges)
+          .id(d => d.id)
+          .distance(100)
+      )
+      .force("charge", d3.forceManyBody().strength(-200))
+      .force("center",
+        d3.forceCenter(canvas.width / 2, canvas.height / 2)
+      );
+
+    let selectedNode = null;
+
+
+    /* ================================
+       렌더링
+    ================================= */
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // edges
+      ctx.strokeStyle = "rgba(200,200,200,0.2)";
+      edges.forEach(e => {
+        ctx.beginPath();
+        ctx.moveTo(e.source.x, e.source.y);
+        ctx.lineTo(e.target.x, e.target.y);
+        ctx.stroke();
+      });
+
+      // nodes
+      nodes.forEach(n => {
+        ctx.beginPath();
+
+        const isSelected = selectedNode === n;
+
+        ctx.arc(n.x, n.y, isSelected ? 8 : 5, 0, Math.PI * 2);
+
+        ctx.fillStyle = isSelected ? "#ffffff" : "#8fa1c7";
+        ctx.fill();
+      });
+    }
+
+
+    /* ================================
+       선택 이벤트
+    ================================= */
+    canvas.addEventListener("click", (e) => {
+      const rect = canvas.getBoundingClientRect();
+
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      selectedNode = nodes.find(n => {
+        const dx = n.x - x;
+        const dy = n.y - y;
+        return Math.sqrt(dx*dx + dy*dy) < 8;
+      });
+
+      if (selectedNode) {
+        renderPanel(selectedNode);
+      }
+    });
+
+
+    /* ================================
+       우측 패널 렌더링
+    ================================= */
+    function renderPanel(node) {
+      const neighbors = edges
+        .filter(e => e.source.id === node.id || e.target.id === node.id)
+        .map(e => e.source.id === node.id ? e.target : e.source);
+
+      document.getElementById("info").innerHTML = `
+        <h3>${node.label || node.id}</h3>
+        <p><b>ID:</b> ${node.id}</p>
+        <p><b>Group:</b> ${node.group || "-"}</p>
+        <p><b>작성자:</b> ${node["작성자"] || "-"}</p>
+        <p><b>진행현황:</b> ${node["진행현황"] || "-"}</p>
+        <p>${node.description || ""}</p>
+
+        ${node.url ? `<p><a href="${node.url}" target="_blank">Open Link</a></p>` : ""}
+
+        <h4>Connections</h4>
+        <ul>
+          ${neighbors.map(n => `<li>${n.label}</li>`).join("")}
+        </ul>
+      `;
+    }
+
+
+    simulation.on("tick", draw);
+
+  })
+  .catch(err => {
+    console.error(err);
+    document.getElementById("info").innerText = "데이터 로딩 실패";
+  });
+
 </script>
 
 </body>
