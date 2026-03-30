@@ -1,160 +1,265 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Graph View</title>
+<meta charset="utf-8">
+<title>Obsidian Graph WebGL</title>
 
-  <script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://pixijs.download/release/pixi.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 
-  <style>
-    body {
-      margin: 0;
-      display: flex;
-      background: #0f1117;
-      color: white;
-      font-family: sans-serif;
-    }
-
-    canvas {
-      flex: 1;
-    }
-
-    #panel {
-      width: 300px;
-      background: #1a1d25;
-      padding: 16px;
-      overflow-y: auto;
-    }
-  </style>
+<style>
+body { margin:0; display:flex; background:#0f1117; color:white; }
+#panel { width:300px; background:#1a1d25; padding:10px; overflow:auto; }
+#ui { position:absolute; top:10px; left:10px; z-index:10; }
+input { padding:5px; }
+button { margin-left:5px; }
+</style>
 </head>
+
 <body>
 
-<canvas id="graph"></canvas>
+<div id="ui">
+  <input id="search" placeholder="Search..." />
+  <button onclick="toggleLocal()">Local</button>
+  <button onclick="resetView()">Reset</button>
+</div>
 
 <div id="panel">
-  <h2>Node Info</h2>
-  <div id="info">Click a node</div>
+  <h3>Node Info</h3>
+  <div id="info">Select node</div>
 </div>
 
 <script>
 
-const SHEET_ID = "10Mxi3ZwBz2b7AgF-zDroRZhahTfsGdMDmbOvWXiv2Q8";
+/* =====================
+   CONFIG
+===================== */
+const SHEET_ID = atob("MTBNeGkzWndCejJiN0FnRi16RHJvUlpocWhUZnNHZE1EbWJPdldYaXYyUTg=");
+const URL = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=nodes`;
 
-const nodesUrl =
-  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&sheet=nodes`;
+/* =====================
+   CSV SAFE PARSER
+===================== */
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, "");
+  const rows = [];
+  let cur = [], field="", quote=false;
 
+  for (let c of text) {
+    if (c === '"') quote = !quote;
+    else if (c === ',' && !quote) { cur.push(field); field=""; }
+    else if ((c === '\n' || c === '\r') && !quote) {
+      if(field||cur.length){cur.push(field);rows.push(cur);}
+      cur=[];field="";
+    } else field+=c;
+  }
+  if(field) cur.push(field);
+  if(cur.length) rows.push(cur);
 
-/* ================================
-   edges 생성
-================================ */
-function buildEdges(nodes) {
-  const edges = [];
+  const headers = rows[0];
+  return rows.slice(1).map(r=>{
+    let o={};
+    headers.forEach((h,i)=>o[h.trim()]=(r[i]||"").trim());
+    return o;
+  });
+}
 
-  nodes.forEach(node => {
-    if (!node.links) return;
-
-    node.links.split(",").forEach(t => {
-      const target = t.trim();
-      if (!target) return;
-
-      edges.push({
-        source: node.id,
-        target: target
-      });
+/* =====================
+   BUILD EDGES
+===================== */
+function buildEdges(nodes){
+  const map=new Map(nodes.map(n=>[n.id,n]));
+  const edges=[];
+  nodes.forEach(n=>{
+    if(!n.links) return;
+    n.links.split(",").forEach(t=>{
+      t=t.trim();
+      if(map.has(t)) edges.push({source:n.id,target:t});
     });
   });
-
   return edges;
 }
 
+/* =====================
+   ADJACENCY
+===================== */
+function buildAdj(edges){
+  const m=new Map();
+  edges.forEach(e=>{
+    if(!m.has(e.source)) m.set(e.source,new Set());
+    if(!m.has(e.target)) m.set(e.target,new Set());
+    m.get(e.source).add(e.target);
+    m.get(e.target).add(e.source);
+  });
+  return m;
+}
 
-/* ================================
-   d3.csv 사용 (핵심 해결)
-================================ */
-d3.csv(nodesUrl).then(nodes => {
+/* =====================
+   LOCAL GRAPH
+===================== */
+function localGraph(nodes,edges,id,depth=1){
+  const visited=new Set([id]);
+  const q=[{id,level:0}];
 
-  const edges = buildEdges(nodes);
+  while(q.length){
+    const {id,level}=q.shift();
+    if(level>=depth) continue;
 
-  console.log("nodes:", nodes);
-  console.log("edges:", edges);
-
-  initGraph(nodes, edges);
-
-});
-
-
-function initGraph(nodes, edges) {
-
-  const canvas = document.getElementById("graph");
-  const ctx = canvas.getContext("2d");
-
-  canvas.width = window.innerWidth - 300;
-  canvas.height = window.innerHeight;
-
-  const simulation = d3.forceSimulation(nodes)
-    .force("link", d3.forceLink(edges).id(d => d.id).distance(100))
-    .force("charge", d3.forceManyBody().strength(-200))
-    .force("center", d3.forceCenter(canvas.width/2, canvas.height/2));
-
-  let selectedNode = null;
-
-  function draw() {
-    ctx.clearRect(0,0,canvas.width,canvas.height);
-
-    edges.forEach(e => {
-      ctx.beginPath();
-      ctx.moveTo(e.source.x, e.source.y);
-      ctx.lineTo(e.target.x, e.target.y);
-      ctx.strokeStyle = "rgba(200,200,200,0.2)";
-      ctx.stroke();
-    });
-
-    nodes.forEach(n => {
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, selectedNode===n?8:5, 0, Math.PI*2);
-      ctx.fillStyle = selectedNode===n?"#fff":"#8fa1c7";
-      ctx.fill();
+    edges.forEach(e=>{
+      const next = e.source===id?e.target:e.target===id?e.source:null;
+      if(next&&!visited.has(next)){
+        visited.add(next);
+        q.push({id:next,level:level+1});
+      }
     });
   }
 
-  canvas.addEventListener("click", (e) => {
-    const rect = canvas.getBoundingClientRect();
+  return {
+    nodes:nodes.filter(n=>visited.has(n.id)),
+    edges:edges.filter(e=>visited.has(e.source)&&visited.has(e.target))
+  };
+}
 
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+/* =====================
+   MAIN
+===================== */
+fetch(URL).then(r=>r.text()).then(csv=>{
+  const nodes=parseCSV(csv);
+  const edges=buildEdges(nodes);
+  const adj=buildAdj(edges);
 
-    selectedNode = nodes.find(n => {
-      const dx = n.x - x;
-      const dy = n.y - y;
-      return Math.sqrt(dx*dx + dy*dy) < 8;
-    });
+  run(nodes,edges,adj);
+});
 
-    if (selectedNode) renderPanel(selectedNode, edges);
+/* =====================
+   GRAPH (PIXI)
+===================== */
+function run(nodes,edges,adj){
+
+  let activeNodes=nodes;
+  let activeEdges=edges;
+
+  let selected=null;
+  let localMode=false;
+
+  const app=new PIXI.Application({resizeTo:window,background:"#0f1117"});
+  document.body.appendChild(app.view);
+
+  const container=new PIXI.Container();
+  app.stage.addChild(container);
+
+  /* ZOOM */
+  let scale=1;
+  app.view.addEventListener("wheel",e=>{
+    e.preventDefault();
+    const s=e.deltaY>0?0.9:1.1;
+    scale*=s;
+    container.scale.set(scale);
   });
 
-  function renderPanel(node, edges) {
-    const neighbors = edges
-      .filter(e => e.source.id === node.id || e.target.id === node.id)
-      .map(e => e.source.id === node.id ? e.target : e.source);
+  /* PAN */
+  let drag=false,last={x:0,y:0};
+  app.view.addEventListener("mousedown",e=>{drag=true;last={x:e.clientX,y:e.clientY}});
+  app.view.addEventListener("mouseup",()=>drag=false);
+  app.view.addEventListener("mousemove",e=>{
+    if(!drag) return;
+    container.x+=e.clientX-last.x;
+    container.y+=e.clientY-last.y;
+    last={x:e.clientX,y:e.clientY};
+  });
 
-    document.getElementById("info").innerHTML = `
-      <h3>${node.label}</h3>
-      <p>ID: ${node.id}</p>
-      <p>Group: ${node.group}</p>
-      <p>작성자: ${node["작성자"]}</p>
-      <p>진행현황: ${node["진행현황"]}</p>
-      <p>${node.description}</p>
-      ${node.url ? `<a href="${node.url}" target="_blank">Link</a>` : ""}
+  /* SIMULATION */
+  const sim=d3.forceSimulation(nodes)
+    .force("link",d3.forceLink(edges).id(d=>d.id).distance(80))
+    .force("charge",d3.forceManyBody().strength(-150))
+    .force("center",d3.forceCenter(window.innerWidth/2,window.innerHeight/2));
 
-      <h4>Connections</h4>
-      ${neighbors.map(n=>`<div>${n.label}</div>`).join("")}
+  setTimeout(()=>sim.stop(),3000);
+
+  const nodeSprites=[];
+  const edgeGraphics=new PIXI.Graphics();
+  container.addChild(edgeGraphics);
+
+  nodes.forEach(n=>{
+    const g=new PIXI.Graphics();
+    g.beginFill(0x8fa1c7).drawCircle(0,0,4).endFill();
+    g.interactive=true;
+
+    g.on("pointerdown",()=>{
+      selected=n;
+      updatePanel(n);
+      if(localMode){
+        const sub=localGraph(nodes,edges,n.id,2);
+        activeNodes=sub.nodes;
+        activeEdges=sub.edges;
+      }
+    });
+
+    nodeSprites.push({node:n,g});
+    container.addChild(g);
+  });
+
+  function updatePanel(n){
+    document.getElementById("info").innerHTML=`
+      <h3>${n.label}</h3>
+      <p>${n.description||""}</p>
+      <p>${n["작성자"]||""}</p>
+      <p>${n["진행현황"]||""}</p>
     `;
   }
 
-  simulation.on("tick", draw);
+  function render(){
+    edgeGraphics.clear();
+
+    const neighbors=adj.get(selected?.id)||new Set();
+
+    activeEdges.forEach(e=>{
+      const s=nodes.find(n=>n.id===e.source);
+      const t=nodes.find(n=>n.id===e.target);
+
+      edgeGraphics.lineStyle(1,0xffffff,0.2);
+      edgeGraphics.moveTo(s.x,s.y);
+      edgeGraphics.lineTo(t.x,t.y);
+    });
+
+    nodeSprites.forEach(o=>{
+      const n=o.node;
+      o.g.x=n.x;
+      o.g.y=n.y;
+
+      if(selected===n) o.g.tint=0xffffff, o.g.scale.set(2);
+      else if(neighbors.has(n.id)) o.g.tint=0x88aaff, o.g.scale.set(1.5);
+      else o.g.tint=0x555577, o.g.scale.set(1);
+    });
+  }
+
+  app.ticker.add(render);
+
+  /* SEARCH */
+  document.getElementById("search").addEventListener("input",e=>{
+    const q=e.target.value.toLowerCase();
+    const f=nodes.find(n=>n.label.toLowerCase().includes(q));
+    if(f){
+      selected=f;
+      updatePanel(f);
+      container.x=window.innerWidth/2-f.x*scale;
+      container.y=window.innerHeight/2-f.y*scale;
+    }
+  });
+
+  window.toggleLocal=()=>{
+    localMode=!localMode;
+    activeNodes=nodes;
+    activeEdges=edges;
+  }
+
+  window.resetView=()=>{
+    container.x=0;container.y=0;scale=1;
+    container.scale.set(1);
+  }
+
 }
 
 </script>
-
 </body>
 </html>
