@@ -13,7 +13,6 @@ export function stripBom(text) {
 
 export function parseCSV(text) {
   text = stripBom(text);
-
   const rows = [];
   let row = [];
   let field = "";

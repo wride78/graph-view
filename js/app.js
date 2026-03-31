@@ -1,6 +1,6 @@
 import { NODES_URL_CANDIDATES, LOCAL_DEPTH } from "./config.js";
 import { loadNodes, buildEdges, buildAdjacency } from "./data.js";
-import { setupPixi, createSimulation, createSprites, applyZoom } from "./graph.js";
+import { setupPixi, createSimulation, createSprites, applyZoom, fitGraphToView, resolveLabelVisibility } from "./graph.js";
 import { setStatus, updateSummary, renderFilters, updateInfoPanel } from "./ui.js";
 
 const state = {
@@ -88,12 +88,8 @@ function focusOnNode(node) {
 }
 
 function resetView() {
-  state.currentScale = 1;
-  state.container.scale.set(1);
   const wrap = document.getElementById("graph-wrap");
-  state.container.x = wrap.clientWidth * 0.08;
-  state.container.y = wrap.clientHeight * 0.08;
-  if (state.selectedNode) focusOnNode(state.selectedNode);
+  fitGraphToView(state, wrap.clientWidth, wrap.clientHeight, state.allNodes, 90);
 }
 
 function selectNode(id, focus = false) {
@@ -120,7 +116,7 @@ function renderScene() {
     if (!s || !t) return;
 
     const strong = state.selectedNode && (e.source === state.selectedNode.id || e.target === state.selectedNode.id);
-    state.edgeLayer.lineStyle(strong ? 2 : 1, strong ? 0x93c5fd : 0xcbd5e1, strong ? 0.62 : 0.16);
+    state.edgeLayer.lineStyle(strong ? 2.5 : 1.6, strong ? 0x93c5fd : 0xa5b4fc, strong ? 0.85 : 0.38);
     state.edgeLayer.moveTo(s.x, s.y);
     state.edgeLayer.lineTo(t.x, t.y);
   });
@@ -136,21 +132,27 @@ function renderScene() {
     const neighbor = state.selectedNode && neighbors.has(n.id);
     const main = isMainNode(n);
 
-    let radius = main ? 9 : 5;
+    let radius = main ? 12 : 8;
     let color = main ? 0xfbbf24 : 0x7dd3fc;
-    let alpha = 0.92;
+    let alpha = 0.96;
+    let labelAlpha = 0.22;
 
     if (selected) {
-      radius = 14;
+      radius = 16;
       color = 0xffffff;
       alpha = 1;
+      labelAlpha = 1;
     } else if (neighbor) {
-      radius = Math.max(radius, 8);
+      radius = Math.max(radius, 11);
       color = 0xa78bfa;
       alpha = 1;
+      labelAlpha = 0.9;
     } else if (state.selectedNode) {
-      alpha = 0.18;
+      alpha = 0.28;
       color = main ? 0xfbbf24 : 0x64748b;
+      labelAlpha = 0.08;
+    } else {
+      labelAlpha = state.currentScale >= 1.15 ? 0.78 : 0.18;
     }
 
     item.g.clear();
@@ -159,13 +161,13 @@ function renderScene() {
     item.g.endFill();
     item.g.x = n.x;
     item.g.y = n.y;
-    item.label.x = n.x;
-    item.label.y = n.y;
 
-    if (selected || neighbor || (!state.selectedNode && state.currentScale > 1.25)) {
-      item.label.visible = true;
-    }
+    item.label.x = n.x;
+    item.label.y = n.y + radius + 4;
+    item.label.alpha = labelAlpha;
   });
+
+  resolveLabelVisibility(state.nodeSprites, state.selectedNode, neighbors, state.currentScale);
 }
 
 function onFilter(type, value) {
@@ -227,6 +229,10 @@ function bindUi() {
   window.addEventListener("mouseup", () => {
     state.isPanning = false;
   });
+
+  window.addEventListener("resize", () => {
+    resetView();
+  });
 }
 
 async function init() {
@@ -258,7 +264,19 @@ async function init() {
   state.adjacency = buildAdjacency(state.allEdges);
 
   state.nodeSprites = createSprites(state.allNodes, state.nodeLayer, state.labelLayer, selectNode);
-  state.simulation = createSimulation(state.allNodes, state.allEdges, isMainNode);
+  state.simulation = createSimulation(
+    state.allNodes,
+    state.allEdges,
+    wrap.clientWidth,
+    wrap.clientHeight,
+    isMainNode
+  );
+
+  setTimeout(() => {
+    state.simulation.stop();
+    resetView();
+    if (state.selectedNode) focusOnNode(state.selectedNode);
+  }, 1800);
 
   renderFilters(state.allNodes, state.activeGroup, state.activeStatus, onFilter);
   updateSummary(getFilteredNodes());

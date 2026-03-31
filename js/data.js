@@ -22,12 +22,8 @@ function decodeCsvBuffer(buffer) {
         cleaned.includes("ì§„í–‰") ||
         cleaned.includes("ì„¤ëª…");
 
-      if (!fallbackBroken) {
-        return cleaned;
-      }
-    } catch (_) {
-      // ignore
-    }
+      if (!fallbackBroken) return cleaned;
+    } catch (_) {}
   }
 
   return text;
@@ -35,29 +31,23 @@ function decodeCsvBuffer(buffer) {
 
 async function fetchCsv(url) {
   const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`CSV 요청 실패: HTTP ${res.status} @ ${url}`);
-  }
+  if (!res.ok) throw new Error(`CSV 요청 실패: HTTP ${res.status} @ ${url}`);
   const buffer = await res.arrayBuffer();
   return decodeCsvBuffer(buffer);
 }
 
 export async function loadNodes(urlCandidates) {
   let lastError = null;
-
   for (const url of urlCandidates) {
     try {
       const csv = await fetchCsv(url);
       const nodes = parseCSV(csv);
-      if (!nodes.length) {
-        throw new Error(`CSV 파싱 결과가 비어 있습니다. @ ${url}`);
-      }
+      if (!nodes.length) throw new Error(`CSV 파싱 결과가 비어 있습니다. @ ${url}`);
       return { nodes, resolvedUrl: url };
     } catch (err) {
       lastError = err;
     }
   }
-
   throw lastError || new Error("CSV 로드에 실패했습니다.");
 }
 
@@ -68,7 +58,6 @@ export function buildEdges(nodes) {
 
   nodes.forEach(n => {
     if (!n.links) return;
-
     String(n.links)
       .split(",")
       .map(v => v.trim())
