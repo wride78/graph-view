@@ -1,42 +1,49 @@
-import {URL0,URL1} from './config.js';
-import {load} from './data.js';
-
-const MAIN_COLOR_MAP={
- "1":0x2f855a,"2":0x6b46c1,"3":0xb91c1c,"4":0x0369a1,"5":0xea580c
-};
+import {URL_MAIN,URL_NODE,MAIN_COLOR_MAP} from "./config.js";
+import {loadData} from "./data.js";
+import {createGraph} from "./graph.js";
+import {showInfo} from "./ui.js";
 
 (async()=>{
- const main=await load(URL0);
- const nodes=await load(URL1);
+ const main=await loadData(URL_MAIN);
+ const nodesRaw=await loadData(URL_NODE);
+
+ const nodes=[];
+ const links=[];
+
+ main.slice(1).forEach(r=>{
+  nodes.push({id:r[0],label:r[1],isMain:true});
+ });
+
+ nodesRaw.slice(1).forEach(r=>{
+  nodes.push({id:r[0],label:r[1],links:r[2],main:r[3]});
+ });
+
+ // build links
+ nodes.forEach(n=>{
+  if(n.links){
+    n.links.split(",").forEach(t=>{
+      links.push({source:n.id,target:t.trim()});
+    });
+  }
+  if(n.main){
+    n.main.split(",").forEach(m=>{
+      links.push({source:n.id,target:m.trim()});
+    });
+  }
+ });
 
  const app=new PIXI.Application({resizeTo:window});
  document.getElementById("graph").appendChild(app.view);
 
- const g=new PIXI.Graphics();
- app.stage.addChild(g);
+ createGraph(app,nodes,links,MAIN_COLOR_MAP);
 
- const sim=d3.forceSimulation()
-  .force("center",d3.forceCenter(window.innerWidth/2,window.innerHeight/2))
-  .force("charge",d3.forceManyBody().strength(-200));
-
- const all=[];
- main.forEach(r=>{
-  all.push({id:r[0],label:r[1],isMain:true});
- });
- nodes.forEach(r=>{
-  all.push({id:r[0],label:r[1],links:r[2],main:r[3]});
- });
-
- sim.nodes(all);
-
- app.ticker.add(()=>{
-  g.clear();
-  all.forEach(n=>{
-    const color=n.isMain?MAIN_COLOR_MAP[n.id]||0xffffff:0x3b82f6;
-    g.beginFill(color);
-    g.drawCircle(n.x,n.y,n.isMain?20:10);
-    g.endFill();
+ app.view.addEventListener("click",e=>{
+  const x=e.clientX,y=e.clientY;
+  let found=null;
+  nodes.forEach(n=>{
+    if(Math.hypot(n.x-x,n.y-y)<15) found=n;
   });
+  showInfo(found);
  });
 
 })();

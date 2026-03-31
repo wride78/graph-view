@@ -1,4 +1,7 @@
-export async function load(url){
- const t=await fetch(url).then(r=>r.text());
- return t.split("\n").slice(1).map(r=>r.split(","));
+import {parseCSV} from "./utils.js";
+
+export async function loadData(url){
+ const res=await fetch(url);
+ const txt=await res.text();
+ return parseCSV(txt);
 }
