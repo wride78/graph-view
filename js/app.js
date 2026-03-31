@@ -1,7 +1,6 @@
-import {URL_MAIN,URL_NODE,MAIN_COLOR_MAP} from "./config.js";
-import {load} from "./data.js";
-import {createGraph} from "./graph.js";
-import {show} from "./ui.js";
+import {URL_MAIN,URL_NODE} from './config.js';
+import {load} from './data.js';
+import {createGraph} from './graph.js';
 
 (async()=>{
  const main=await load(URL_MAIN);
@@ -33,9 +32,12 @@ import {show} from "./ui.js";
   }
  });
 
+ console.log("nodes",nodes);
+ console.log("links",links);
+
  const app=new PIXI.Application({resizeTo:window});
  document.getElementById("graph").appendChild(app.view);
 
- createGraph(app,nodes,links,MAIN_COLOR_MAP,show);
+ createGraph(app,nodes,links);
 
 })();
