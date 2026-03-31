@@ -36,7 +36,7 @@ export function setupPixi(wrap, renderScene) {
 }
 
 export function createSimulation(nodes, edges, isMainNode) {
-  return d3.forceSimulation(nodes)
+  const sim = d3.forceSimulation(nodes)
     .alpha(0.9)
     .alphaDecay(0.025)
     .velocityDecay(0.36)
@@ -44,6 +44,12 @@ export function createSimulation(nodes, edges, isMainNode) {
     .force("charge", d3.forceManyBody().strength(-260))
     .force("center", d3.forceCenter(420, window.innerHeight * 0.5))
     .force("collision", d3.forceCollide().radius(d => isMainNode(d) ? 18 : 11));
+
+  sim.on("tick", () => {
+    if (sim.alpha() < 0.02) sim.alpha(0.024);
+  });
+
+  return sim;
 }
 
 export function createSprites(nodes, nodeLayer, labelLayer, onSelect) {

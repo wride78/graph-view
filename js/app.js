@@ -1,13 +1,12 @@
-import { NODES_URL, LOCAL_DEPTH } from "./config.js";
+import { NODES_URL_CANDIDATES, LOCAL_DEPTH } from "./config.js";
 import { loadNodes, buildEdges, buildAdjacency } from "./data.js";
 import { setupPixi, createSimulation, createSprites, applyZoom } from "./graph.js";
 import { setStatus, updateSummary, renderFilters, updateInfoPanel } from "./ui.js";
 
-console.log("NODES_URL =", NODES_URL);
-
 const state = {
   allNodes: [],
   allEdges: [],
+  invalidLinks: [],
   adjacency: new Map(),
   selectedNode: null,
   localMode: false,
@@ -23,7 +22,8 @@ const state = {
   simulation: null,
   nodeSprites: [],
   isPanning: false,
-  panStart: { x: 0, y: 0 }
+  panStart: { x: 0, y: 0 },
+  resolvedUrl: ""
 };
 
 function isMainNode(node) {
@@ -242,10 +242,19 @@ async function init() {
 
   bindUi();
 
-  state.allNodes = await loadNodes(NODES_URL);
-  setStatus(`노드 ${state.allNodes.length}개 로드 완료. edges 생성 중...`);
+  const loaded = await loadNodes(NODES_URL_CANDIDATES);
+  state.allNodes = loaded.nodes;
+  state.resolvedUrl = loaded.resolvedUrl;
 
-  state.allEdges = buildEdges(state.allNodes);
+  console.log("resolved csv url:", state.resolvedUrl);
+  console.log("loaded headers:", state.allNodes[0] ? Object.keys(state.allNodes[0]) : []);
+  console.log("first node:", state.allNodes[0]);
+
+  setStatus(`노드 ${state.allNodes.length}개 로드 완료. edges 생성 중...\nURL: ${state.resolvedUrl}`);
+
+  const edgeResult = buildEdges(state.allNodes);
+  state.allEdges = edgeResult.edges;
+  state.invalidLinks = edgeResult.invalidLinks;
   state.adjacency = buildAdjacency(state.allEdges);
 
   state.nodeSprites = createSprites(state.allNodes, state.nodeLayer, state.labelLayer, selectNode);
@@ -258,7 +267,13 @@ async function init() {
   if (mainNode) selectNode(mainNode.id, false);
   resetView();
 
-  setStatus(`정상 로드 완료: nodes ${state.allNodes.length}, edges ${state.allEdges.length}`);
+  let statusMessage = `정상 로드 완료: nodes ${state.allNodes.length}, edges ${state.allEdges.length}`;
+  if (state.invalidLinks.length) {
+    statusMessage += `\n잘못된 links ${state.invalidLinks.length}건`;
+    console.warn("invalid links:", state.invalidLinks);
+  }
+  statusMessage += `\nURL: ${state.resolvedUrl}`;
+  setStatus(statusMessage);
 }
 
 init().catch(err => {

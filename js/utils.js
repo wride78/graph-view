@@ -7,8 +7,13 @@ export function escapeHtml(value) {
     .replaceAll("'", "&#39;");
 }
 
+export function stripBom(text) {
+  return text.replace(/^\uFEFF/, "");
+}
+
 export function parseCSV(text) {
-  text = text.replace(/^\uFEFF/, "");
+  text = stripBom(text);
+
   const rows = [];
   let row = [];
   let field = "";
