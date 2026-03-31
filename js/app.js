@@ -1,18 +1,18 @@
-import { NODES_URL_CANDIDATES, LOCAL_DEPTH } from "./config.js";
-import { loadNodes, buildEdges, buildAdjacency } from "./data.js";
-import { setupPixi, createSimulation, createSprites, applyZoom, fitGraphToView, resolveLabelVisibility } from "./graph.js";
+import { MAIN_URL_CANDIDATES, NODE_URL_CANDIDATES, LOCAL_DEPTH } from "./config.js";
+import { loadSheet, normalizeMainNodes, normalizeNodeRows, mergeNodes, buildEdges, buildAdjacency } from "./data.js";
+import { setupPixi, createSimulation, createSprites, applyZoom, fitGraphToView } from "./graph.js";
 import { setStatus, updateSummary, renderFilters, updateInfoPanel } from "./ui.js";
 
 const state = {
-  allNodes: [], allEdges: [], invalidLinks: [], adjacency: new Map(),
-  selectedNode: null, localMode: false, localDepth: LOCAL_DEPTH,
-  currentScale: 1, activeGroup: "전체", activeStatus: "전체",
-  app: null, container: null, edgeLayer: null, nodeLayer: null, labelLayer: null,
-  simulation: null, nodeSprites: [], isPanning: false, panStart: { x: 0, y: 0 }, resolvedUrl: ""
+  mainNodes: [], subNodes: [], allNodes: [], allEdges: [], invalidLinks: [], adjacency: new Map(),
+  selectedNode: null, localMode: false, localDepth: LOCAL_DEPTH, currentScale: 1,
+  activeGroup: "전체", activeStatus: "전체",
+  app: null, container: null, edgeLayer: null, nodeLayer: null, labelLayer: null, simulation: null, nodeSprites: [],
+  isPanning: false, panStart: { x: 0, y: 0 }, resolvedMainUrl: "", resolvedNodeUrl: "", draggedNode: null
 };
 
 function isMainNode(node) {
-  return String(node.group || "").toLowerCase().includes("main") || String(node.id || "").toLowerCase() === "main";
+  return !!node.isMain || String(node.group || "").toLowerCase().includes("main") || String(node.id || "").toLowerCase() === "main";
 }
 function getNodeById(id) {
   return state.allNodes.find(n => String(n.id).trim() === String(id).trim()) || null;
@@ -23,7 +23,7 @@ function getNeighbors(id) {
 function getFilteredNodes() {
   return state.allNodes.filter(n => {
     const groupPass = state.activeGroup === "전체" || (n.group || "미분류") === state.activeGroup;
-    const statusPass = state.activeStatus === "전체" || (n["진행현황"] || "미정") === state.activeStatus;
+    const statusPass = state.activeStatus === "전체" || (n.state || "미정") === state.activeStatus;
     return groupPass && statusPass;
   });
 }
@@ -70,6 +70,35 @@ function selectNode(id, focus = false) {
   updateInfoPanel(state.selectedNode, getNodeById, getNeighbors, selectNode);
   if (focus) focusOnNode(node);
 }
+function screenToWorld(clientX, clientY) {
+  const rect = state.app.view.getBoundingClientRect();
+  const localX = clientX - rect.left;
+  const localY = clientY - rect.top;
+  return { x: (localX - state.container.x) / state.currentScale, y: (localY - state.container.y) / state.currentScale };
+}
+function onNodeDragStart(node, event) {
+  state.draggedNode = node;
+  const p = event.data.global;
+  const world = screenToWorld(p.x, p.y);
+  node.fx = world.x;
+  node.fy = world.y;
+  selectNode(node.id, false);
+  if (state.simulation) state.simulation.alphaTarget(0.18).restart();
+}
+function onNodeDragMove(node, event) {
+  const p = event.data.global;
+  const world = screenToWorld(p.x, p.y);
+  node.fx = world.x;
+  node.fy = world.y;
+}
+function onNodeDragEnd(node) {
+  node.x = node.fx ?? node.x;
+  node.y = node.fy ?? node.y;
+  node.fx = null;
+  node.fy = null;
+  state.draggedNode = null;
+  if (state.simulation) state.simulation.alphaTarget(0.03);
+}
 function renderScene() {
   if (!state.edgeLayer) return;
   const graph = getFilteredGraph();
@@ -82,7 +111,8 @@ function renderScene() {
     const s = getNodeById(e.source), t = getNodeById(e.target);
     if (!s || !t) return;
     const strong = state.selectedNode && (e.source === String(state.selectedNode.id).trim() || e.target === String(state.selectedNode.id).trim());
-    state.edgeLayer.lineStyle(strong ? 2.5 : 1.8, strong ? 0x93c5fd : 0xa5b4fc, strong ? 0.88 : 0.45);
+    const isMainLink = e.type === "main_link";
+    state.edgeLayer.lineStyle(strong ? 3.2 : isMainLink ? 2.4 : 2.0, strong ? 0x93c5fd : isMainLink ? 0x8dd3c7 : 0x9fb5d6, strong ? 0.92 : isMainLink ? 0.72 : 0.62);
     state.edgeLayer.moveTo(s.x, s.y);
     state.edgeLayer.lineTo(t.x, t.y);
   });
@@ -92,50 +122,41 @@ function renderScene() {
     const nid = String(n.id).trim();
     const visible = visibleIds.has(nid);
     item.g.visible = visible;
-    item.labelGroup.visible = false;
+    item.label.visible = visible;
     if (!visible) return;
 
     const selected = state.selectedNode && String(state.selectedNode.id).trim() === nid;
     const neighbor = state.selectedNode && neighbors.has(nid);
     const main = isMainNode(n);
 
-    let radius = main ? 12 : 8;
-    let color = main ? 0xfbbf24 : 0x7dd3fc;
-    let alpha = 0.96;
-    let labelAlpha = 0.18;
+    let radius = main ? 42 : 32;
+    let color = main ? 0x2f855a : 0x234a84;
+    let alpha = 0.98;
+    let textAlpha = 1;
 
-    if (selected) {
-      radius = 16; color = 0xffffff; alpha = 1; labelAlpha = 1;
-    } else if (neighbor) {
-      radius = Math.max(radius, 11); color = 0xa78bfa; alpha = 1; labelAlpha = 0.92;
-    } else if (state.selectedNode) {
-      alpha = 0.28; color = main ? 0xfbbf24 : 0x64748b; labelAlpha = 0.06;
-    } else {
-      labelAlpha = state.currentScale >= 1.05 ? 0.82 : 0.18;
-    }
+    if (selected) { radius = Math.max(radius, 46); color = main ? 0x2f855a : 0x325ea8; alpha = 1; }
+    else if (neighbor) { radius = Math.max(radius, 36); color = main ? 0x2b6f4b : 0x3b5fa4; alpha = 1; }
+    else if (state.selectedNode) { alpha = 0.42; textAlpha = 0.55; }
 
     item.g.clear();
+    item.g.lineStyle(3, 0xe2e8f0, 0.85);
     item.g.beginFill(color, alpha);
     item.g.drawCircle(0, 0, radius);
     item.g.endFill();
-    item.g.x = n.x; item.g.y = n.y;
+    item.g.x = n.x;
+    item.g.y = n.y;
 
-    item.labelGroup.x = n.x;
-    item.labelGroup.y = n.y + radius + 4;
-    item.labelGroup.alpha = labelAlpha;
-
-    const borderColor = selected ? 0xffffff : neighbor ? 0x93c5fd : 0x334155;
-    const fillColor = selected ? 0x1e293b : neighbor ? 0x1f2937 : 0x0f172a;
-    const w = item.labelBox.width, h = item.labelBox.height;
-    item.labelBg.clear();
-    item.labelBg.lineStyle(1, borderColor, selected || neighbor ? 0.95 : 0.6);
-    item.labelBg.beginFill(fillColor, selected || neighbor ? 0.95 : 0.82);
-    item.labelBg.drawRoundedRect(-w / 2, 0, w, h, 8);
-    item.labelBg.endFill();
-    item.label.style.fill = selected ? 0xffffff : neighbor ? 0xe9d5ff : 0xe5eefc;
+    item.label.x = n.x;
+    item.label.y = n.y;
+    item.label.alpha = textAlpha;
+    item.label.style.fontSize = Math.max(10, Math.min(15, radius * 0.38));
+    item.label.style.wordWrapWidth = Math.max(50, radius * 1.55);
+    item.label.style.lineHeight = Math.max(12, radius * 0.44);
+    if (!n.links && !state.selectedNode) {
+      item.label.visible = true;
+      item.label.alpha = 0.95;
+    }
   });
-
-  resolveLabelVisibility(state.nodeSprites, state.selectedNode, neighbors, state.currentScale);
 }
 function onFilter(type, value) {
   if (type === "group") state.activeGroup = value;
@@ -160,7 +181,8 @@ function bindUi() {
     const found = state.allNodes.find(n =>
       String(n.label || "").toLowerCase().includes(q) ||
       String(n.id || "").toLowerCase().includes(q) ||
-      String(n.description || "").toLowerCase().includes(q)
+      String(n.description || "").toLowerCase().includes(q) ||
+      String(n.remarks || "").toLowerCase().includes(q)
     );
     if (found) selectNode(found.id, true);
   });
@@ -175,67 +197,5 @@ function bindUi() {
   }, { passive: false });
   state.app.view.addEventListener("mousedown", (e) => {
     if (e.target !== state.app.view) return;
-    state.isPanning = true;
-    state.panStart = { x: e.clientX, y: e.clientY };
-  });
-  window.addEventListener("mousemove", (e) => {
-    if (!state.isPanning) return;
-    state.container.x += e.clientX - state.panStart.x;
-    state.container.y += e.clientY - state.panStart.y;
-    state.panStart = { x: e.clientX, y: e.clientY };
-  });
-  window.addEventListener("mouseup", () => { state.isPanning = false; });
-  window.addEventListener("resize", () => { resetView(); });
-}
-async function init() {
-  setStatus("CSV 데이터를 불러오는 중...");
-  const wrap = document.getElementById("graph-wrap");
-  const pixi = setupPixi(wrap, renderScene);
-  state.app = pixi.app; state.container = pixi.container; state.edgeLayer = pixi.edgeLayer;
-  state.labelLayer = pixi.labelLayer; state.nodeLayer = pixi.nodeLayer;
-  bindUi();
-
-  const loaded = await loadNodes(NODES_URL_CANDIDATES);
-  state.allNodes = loaded.nodes;
-  state.resolvedUrl = loaded.resolvedUrl;
-
-  console.log("resolved csv url:", state.resolvedUrl);
-  console.log("loaded headers:", state.allNodes[0] ? Object.keys(state.allNodes[0]) : []);
-  console.log("first node:", state.allNodes[0]);
-
-  setStatus(`노드 ${state.allNodes.length}개 로드 완료. edges 생성 중...\nURL: ${state.resolvedUrl}`);
-
-  const edgeResult = buildEdges(state.allNodes);
-  state.allEdges = edgeResult.edges;
-  state.invalidLinks = edgeResult.invalidLinks;
-  state.adjacency = buildAdjacency(state.allEdges);
-
-  state.nodeSprites = createSprites(state.allNodes, state.nodeLayer, state.labelLayer, selectNode);
-  state.simulation = createSimulation(state.allNodes, state.allEdges, wrap.clientWidth, wrap.clientHeight, isMainNode);
-
-  setTimeout(() => {
-    state.simulation.stop();
-    resetView();
-    if (state.selectedNode) focusOnNode(state.selectedNode);
-  }, 1800);
-
-  renderFilters(state.allNodes, state.activeGroup, state.activeStatus, onFilter);
-  updateSummary(getFilteredNodes());
-
-  const mainNode = state.allNodes.find(isMainNode) || state.allNodes[0];
-  if (mainNode) selectNode(mainNode.id, false);
-  resetView();
-
-  let statusMessage = `정상 로드 완료: nodes ${state.allNodes.length}, edges ${state.allEdges.length}`;
-  if (state.invalidLinks.length) {
-    statusMessage += `\n잘못된 links ${state.invalidLinks.length}건`;
-    console.warn("invalid links:", state.invalidLinks);
-  }
-  statusMessage += `\nURL: ${state.resolvedUrl}`;
-  setStatus(statusMessage);
-}
-init().catch(err => {
-  console.error(err);
-  setStatus(`그래프 로드 실패\n${err.message}`, true);
-  document.getElementById("info").innerHTML = `<div class="empty">데이터를 불러오지 못했습니다.</div>`;
-});
+    if (state.draggedNode) return;
+    state.isPanning = True
