@@ -1,45 +1,15 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Work Graph</title>
-  <link rel="stylesheet" href="./style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
-  <script src="https://d3js.org/d3.v7.min.js"></script>
+<meta charset="utf-8">
+<title>Work Graph</title>
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.4.2/pixi.min.js"></script>
+<script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
-  <div id="graph-wrap">
-    <div id="topbar">
-      <div id="filters" class="panel">
-        <h1>업무 네트워크 그래프</h1>
-        <div class="filter-row"><div class="filter-label">그룹</div><div id="groupFilters"></div></div>
-        <div class="filter-row"><div class="filter-label">진행상태</div><div id="statusFilters"></div></div>
-      </div>
-      <div id="top-actions">
-        <div id="searchBox" class="panel">
-          <input id="searchInput" type="text" placeholder="노드 검색" />
-          <button id="localBtn" class="btn toggle" type="button">Local</button>
-        </div>
-        <div id="controlBox" class="panel">
-          <button id="zoomOutBtn" class="btn" type="button">−</button>
-          <button id="zoomInBtn" class="btn" type="button">+</button>
-          <button id="resetBtn" class="btn" type="button">↺</button>
-        </div>
-      </div>
-    </div>
-    <div id="statusBox">초기화 중...</div>
-    <div id="bottom-summary">
-      <div class="summary-card"><div class="summary-title">전체 노드</div><div class="summary-value" id="totalCount">0</div></div>
-      <div class="summary-card"><div class="summary-title">진행중</div><div class="summary-value" id="inProgressCount">0</div></div>
-      <div class="summary-card"><div class="summary-title">완료</div><div class="summary-value" id="doneCount">0</div></div>
-      <div class="summary-card"><div class="summary-title">계획</div><div class="summary-value" id="plannedCount">0</div></div>
-    </div>
-  </div>
-  <aside id="side-panel">
-    <h2>노드 정보</h2>
-    <div id="info" class="empty">그래프에서 노드를 선택하면 상세 정보와 관련 links 노드가 표시됩니다.</div>
-  </aside>
-  <script type="module" src="./js/app.js"></script>
+<div id="graph"></div>
+<div id="status"></div>
+<script type="module" src="./js/app.js"></script>
 </body>
 </html>
