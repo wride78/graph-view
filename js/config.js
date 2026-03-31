@@ -11,4 +11,5 @@ export const LOCAL_DEPTH = 1;
 export const SCALE_MIN = 0.35;
 export const SCALE_MAX = 3.5;
 export const LABEL_FONT_SIZE = 12;
-export const LABEL_COLLISION_PADDING = 6;
+export const LABEL_COLLISION_PADDING = 8;
+export const LABEL_SHOW_SCALE = 1.05;

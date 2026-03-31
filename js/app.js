@@ -125,7 +125,7 @@ function renderScene() {
     const n = item.node;
     const visible = visibleIds.has(n.id);
     item.g.visible = visible;
-    item.label.visible = false;
+    item.labelGroup.visible = false;
     if (!visible) return;
 
     const selected = state.selectedNode && state.selectedNode.id === n.id;
@@ -135,7 +135,7 @@ function renderScene() {
     let radius = main ? 12 : 8;
     let color = main ? 0xfbbf24 : 0x7dd3fc;
     let alpha = 0.96;
-    let labelAlpha = 0.22;
+    let labelAlpha = 0.18;
 
     if (selected) {
       radius = 16;
@@ -146,13 +146,13 @@ function renderScene() {
       radius = Math.max(radius, 11);
       color = 0xa78bfa;
       alpha = 1;
-      labelAlpha = 0.9;
+      labelAlpha = 0.92;
     } else if (state.selectedNode) {
       alpha = 0.28;
       color = main ? 0xfbbf24 : 0x64748b;
-      labelAlpha = 0.08;
+      labelAlpha = 0.06;
     } else {
-      labelAlpha = state.currentScale >= 1.15 ? 0.78 : 0.18;
+      labelAlpha = state.currentScale >= 1.05 ? 0.82 : 0.12;
     }
 
     item.g.clear();
@@ -162,9 +162,21 @@ function renderScene() {
     item.g.x = n.x;
     item.g.y = n.y;
 
-    item.label.x = n.x;
-    item.label.y = n.y + radius + 4;
-    item.label.alpha = labelAlpha;
+    item.labelGroup.x = n.x;
+    item.labelGroup.y = n.y + radius + 4;
+    item.labelGroup.alpha = labelAlpha;
+
+    const borderColor = selected ? 0xffffff : neighbor ? 0x93c5fd : 0x334155;
+    const fillColor = selected ? 0x1e293b : neighbor ? 0x1f2937 : 0x0f172a;
+    item.labelBg.clear();
+    item.labelBg.lineStyle(1, borderColor, selected || neighbor ? 0.95 : 0.6);
+    item.labelBg.beginFill(fillColor, selected || neighbor ? 0.95 : 0.78);
+    const w = item.labelBox.width;
+    const h = item.labelBox.height;
+    item.labelBg.drawRoundedRect(-w / 2, -2, w, h, 8);
+    item.labelBg.endFill();
+
+    item.label.style.fill = selected ? 0xffffff : neighbor ? 0xe9d5ff : 0xe5eefc;
   });
 
   resolveLabelVisibility(state.nodeSprites, state.selectedNode, neighbors, state.currentScale);

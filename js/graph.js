@@ -1,4 +1,4 @@
-import { SCALE_MIN, SCALE_MAX, LABEL_FONT_SIZE, LABEL_COLLISION_PADDING } from "./config.js";
+import { SCALE_MIN, SCALE_MAX, LABEL_FONT_SIZE, LABEL_COLLISION_PADDING, LABEL_SHOW_SCALE } from "./config.js";
 
 export function setupPixi(wrap, renderScene) {
   const app = new PIXI.Application({
@@ -52,6 +52,24 @@ export function createSimulation(nodes, edges, wrapWidth, wrapHeight, isMainNode
   return sim;
 }
 
+function createLabelBox(label, color = 0x0f172a, alpha = 0.82, borderColor = 0x334155, borderAlpha = 0.9) {
+  const paddingX = 8;
+  const paddingY = 4;
+  const box = new PIXI.Graphics();
+  const width = label.width + paddingX * 2;
+  const height = label.height + paddingY * 2;
+  const x = -width / 2;
+  const y = -2;
+
+  box.clear();
+  box.lineStyle(1, borderColor, borderAlpha);
+  box.beginFill(color, alpha);
+  box.drawRoundedRect(x, y, width, height, 8);
+  box.endFill();
+
+  return { box, width, height, paddingX, paddingY };
+}
+
 export function createSprites(nodes, nodeLayer, labelLayer, onSelect) {
   const nodeSprites = [];
   nodeLayer.removeChildren();
@@ -66,18 +84,26 @@ export function createSprites(nodes, nodeLayer, labelLayer, onSelect) {
       onSelect(node.id, true);
     });
 
+    const labelGroup = new PIXI.Container();
     const label = new PIXI.Text(node.label || node.id, {
       fill: 0xe5eefc,
       fontSize: LABEL_FONT_SIZE,
       fontFamily: "Arial",
       fontWeight: "600"
     });
-    label.anchor.set(0.5, -0.2);
-    label.visible = true;
+    label.anchor.set(0.5, 0);
+
+    const bg = createLabelBox(label);
+    label.x = 0;
+    label.y = 3;
+
+    labelGroup.addChild(bg.box);
+    labelGroup.addChild(label);
+    labelGroup.visible = true;
 
     nodeLayer.addChild(g);
-    labelLayer.addChild(label);
-    nodeSprites.push({ node, g, label });
+    labelLayer.addChild(labelGroup);
+    nodeSprites.push({ node, g, labelGroup, label, labelBg: bg.box, labelBox: bg });
   });
 
   return nodeSprites;
@@ -128,28 +154,29 @@ export function resolveLabelVisibility(nodeSprites, selectedNode, neighbors, cur
   for (const item of nodeSprites) {
     const node = item.node;
     if (!item.g.visible) {
-      item.label.visible = false;
+      item.labelGroup.visible = false;
       continue;
     }
 
     const isSelected = selectedNode && selectedNode.id === node.id;
     const isNeighbor = selectedNode && neighbors.has(node.id);
     const alwaysShow = isSelected || isNeighbor;
-    const scaleShow = !selectedNode && currentScale >= 0.9;
+    const scaleShow = !selectedNode && currentScale >= LABEL_SHOW_SCALE;
     const shouldShow = alwaysShow || scaleShow;
 
-    item.label.visible = shouldShow;
+    item.labelGroup.visible = shouldShow;
     if (!shouldShow) continue;
 
-    const width = item.label.width;
-    const height = item.label.height;
+    const width = item.labelBox.width;
+    const height = item.labelBox.height + LABEL_COLLISION_PADDING;
+
     visibleCandidates.push({
       item,
       priority: isSelected ? 3 : isNeighbor ? 2 : 1,
-      x: item.label.x - width / 2,
-      y: item.label.y,
+      x: item.labelGroup.x - width / 2,
+      y: item.labelGroup.y,
       w: width,
-      h: height + LABEL_COLLISION_PADDING
+      h: height
     });
   }
 
@@ -164,7 +191,7 @@ export function resolveLabelVisibility(nodeSprites, selectedNode, neighbors, cur
       cand.y + cand.h > a.y
     );
 
-    cand.item.label.visible = !overlap;
+    cand.item.labelGroup.visible = !overlap;
     if (!overlap) accepted.push(cand);
   }
 }
