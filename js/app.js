@@ -8,8 +8,7 @@ const state = {
   selectedNode: null, localMode: false, localDepth: LOCAL_DEPTH,
   currentScale: 1, activeGroup: "전체", activeStatus: "전체",
   app: null, container: null, edgeLayer: null, nodeLayer: null, labelLayer: null,
-  simulation: null, nodeSprites: [], isPanning: false, panStart: { x: 0, y: 0 }, resolvedUrl: "",
-  draggedNode: null
+  simulation: null, nodeSprites: [], isPanning: false, panStart: { x: 0, y: 0 }, resolvedUrl: ""
 };
 
 function isMainNode(node) {
@@ -145,47 +144,6 @@ function onFilter(type, value) {
   updateSummary(getFilteredNodes());
   updateInfoPanel(state.selectedNode, getNodeById, getNeighbors, selectNode);
 }
-
-function screenToWorld(clientX, clientY) {
-  const rect = state.app.view.getBoundingClientRect();
-  const localX = clientX - rect.left;
-  const localY = clientY - rect.top;
-  return {
-    x: (localX - state.container.x) / state.currentScale,
-    y: (localY - state.container.y) / state.currentScale
-  };
-}
-
-function onNodeDragStart(node, event) {
-  state.draggedNode = node;
-  const p = event.data.global;
-  const world = screenToWorld(p.x, p.y);
-  node.fx = world.x;
-  node.fy = world.y;
-  selectNode(node.id, false);
-  if (state.simulation) {
-    state.simulation.alphaTarget(0.18).restart();
-  }
-}
-
-function onNodeDragMove(node, event) {
-  const p = event.data.global;
-  const world = screenToWorld(p.x, p.y);
-  node.fx = world.x;
-  node.fy = world.y;
-}
-
-function onNodeDragEnd(node) {
-  node.x = node.fx ?? node.x;
-  node.y = node.fy ?? node.y;
-  node.fx = null;
-  node.fy = null;
-  state.draggedNode = null;
-  if (state.simulation) {
-    state.simulation.alphaTarget(0.03);
-  }
-}
-
 function bindUi() {
   document.getElementById("zoomInBtn").addEventListener("click", () => {
     const wrap = document.getElementById("graph-wrap");
@@ -217,7 +175,6 @@ function bindUi() {
   }, { passive: false });
   state.app.view.addEventListener("mousedown", (e) => {
     if (e.target !== state.app.view) return;
-    if (state.draggedNode) return;
     state.isPanning = true;
     state.panStart = { x: e.clientX, y: e.clientY };
   });
@@ -253,12 +210,7 @@ async function init() {
   state.invalidLinks = edgeResult.invalidLinks;
   state.adjacency = buildAdjacency(state.allEdges);
 
-  state.nodeSprites = createSprites(state.allNodes, state.nodeLayer, state.labelLayer, {
-    onSelect: selectNode,
-    onDragStart: onNodeDragStart,
-    onDragMove: onNodeDragMove,
-    onDragEnd: onNodeDragEnd
-  });
+  state.nodeSprites = createSprites(state.allNodes, state.nodeLayer, state.labelLayer, selectNode);
   state.simulation = createSimulation(state.allNodes, state.allEdges, wrap.clientWidth, wrap.clientHeight, isMainNode);
 
   setTimeout(() => {
@@ -280,7 +232,6 @@ async function init() {
     console.warn("invalid links:", state.invalidLinks);
   }
   statusMessage += `\nURL: ${state.resolvedUrl}`;
-  statusMessage += `\n노드는 드래그로 개별 이동 가능합니다.`;
   setStatus(statusMessage);
 }
 init().catch(err => {

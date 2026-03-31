@@ -46,43 +46,15 @@ function buildLabelBoxMetrics(label) {
   return { width, height, paddingX, paddingY };
 }
 
-export function createSprites(nodes, nodeLayer, labelLayer, handlers) {
+export function createSprites(nodes, nodeLayer, labelLayer, onSelect) {
   const nodeSprites = [];
   nodeLayer.removeChildren();
   labelLayer.removeChildren();
-
   nodes.forEach(node => {
     const g = new PIXI.Graphics();
     g.eventMode = "static";
     g.cursor = "pointer";
-
-    let dragging = false;
-
-    g.on("pointerdown", (event) => {
-      event.stopPropagation();
-      dragging = true;
-      g.cursor = "grabbing";
-      handlers.onDragStart?.(node, event);
-    });
-
-    g.on("pointermove", (event) => {
-      if (!dragging) return;
-      handlers.onDragMove?.(node, event);
-    });
-
-    const endDrag = () => {
-      if (!dragging) return;
-      dragging = false;
-      g.cursor = "pointer";
-      handlers.onDragEnd?.(node);
-    };
-
-    g.on("pointerup", endDrag);
-    g.on("pointerupoutside", endDrag);
-    g.on("pointertap", (event) => {
-      event.stopPropagation();
-      handlers.onSelect?.(node.id, false);
-    });
+    g.on("pointerdown", (event) => { event.stopPropagation(); onSelect(node.id, true); });
 
     const labelGroup = new PIXI.Container();
     const labelBg = new PIXI.Graphics();
